@@ -1,0 +1,9 @@
+node_modules
+dist
+build
+.cache
+.vite
+public/build
+coverage
+*.log
+.DS_Store
