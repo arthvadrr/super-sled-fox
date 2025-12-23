@@ -574,37 +574,78 @@ export default function Game() {
       const rightIdx = Math.min((sampleLevel.segments && sampleLevel.segments.length - 1) || 0, Math.ceil(rightWorld) + RENDER.PADDING);
 
       // draw terrain (filled polygon) only in visible range
+      // Draw each continuous ground chunk separately so gaps (null heights) remain empty.
       vctx.fillStyle = '#2a6f3a';
-      vctx.beginPath();
-      let started = false;
+      const DEBUG_GAP_MARKERS = true; // temporary visual aid: draw marker at top when sampler returns null
+      let inChunk = false;
+      let chunkFirstX = 0; // world x of first sample in chunk
+      let chunkLastX = 0; // world x of last sample in chunk
       for (let xi = leftIdx; xi <= rightIdx; xi++) {
         const sx = xi - camOffsetX;
         const hy = getHeightAtX(sampleLevel as any, xi);
         if (hy === null) {
-          // gap: if currently drawing, close and fill the polygon to bottom, then restart
-          if (started) {
-            vctx.lineTo((xi - 1) - camOffsetX, VIRTUAL_HEIGHT);
-            vctx.lineTo(leftIdx - camOffsetX, VIRTUAL_HEIGHT);
+          if (DEBUG_GAP_MARKERS) {
+            // small red marker at top to confirm sampler returned null here
+            vctx.fillStyle = 'red';
+            vctx.fillRect(Math.round(sx) - 1, 2, 2, 6);
+            vctx.fillStyle = '#2a6f3a';
+          }
+          // gap: if we were drawing a chunk, close and fill it
+          if (inChunk) {
+            // finish polygon for this chunk
+            vctx.lineTo(chunkLastX - camOffsetX, VIRTUAL_HEIGHT);
+            vctx.lineTo(chunkFirstX - camOffsetX, VIRTUAL_HEIGHT);
             vctx.closePath();
             vctx.fill();
+            // optionally stroke the top edge of the chunk
             vctx.beginPath();
-            started = false;
+            vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+            vctx.lineWidth = 1;
+            vctx.moveTo(chunkFirstX - camOffsetX, getHeightAtX(sampleLevel as any, chunkFirstX) as number);
+            for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
+              const hy_i = getHeightAtX(sampleLevel as any, sx_i);
+              if (hy_i === null) break;
+              vctx.lineTo(sx_i - camOffsetX, hy_i);
+            }
+            vctx.stroke();
+            vctx.beginPath();
+            inChunk = false;
           }
           continue;
         }
-        if (!started) {
+
+        if (!inChunk) {
+          // start a new chunk
+          chunkFirstX = xi;
+          chunkLastX = xi;
+          vctx.beginPath();
           vctx.moveTo(sx, hy);
-          started = true;
+          inChunk = true;
         } else {
+          // continue current chunk
           vctx.lineTo(sx, hy);
+          chunkLastX = xi;
         }
       }
-      if (started) {
-        // close the shape to bottom and fill
-        vctx.lineTo(rightIdx - camOffsetX, VIRTUAL_HEIGHT);
-        vctx.lineTo(leftIdx - camOffsetX, VIRTUAL_HEIGHT);
+
+      if (inChunk) {
+        // close and fill the final chunk
+        vctx.lineTo(chunkLastX - camOffsetX, VIRTUAL_HEIGHT);
+        vctx.lineTo(chunkFirstX - camOffsetX, VIRTUAL_HEIGHT);
         vctx.closePath();
         vctx.fill();
+        // stroke top edge of final chunk
+        vctx.beginPath();
+        vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        vctx.lineWidth = 1;
+        vctx.moveTo(chunkFirstX - camOffsetX, getHeightAtX(sampleLevel as any, chunkFirstX) as number);
+        for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
+          const hy_i = getHeightAtX(sampleLevel as any, sx_i);
+          if (hy_i === null) break;
+          vctx.lineTo(sx_i - camOffsetX, hy_i);
+        }
+        vctx.stroke();
+        vctx.beginPath();
       }
 
       // draw level objects (start/checkpoint/finish) culling to visible range
