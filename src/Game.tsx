@@ -520,7 +520,31 @@ export default function Game() {
           }
           const flip = currPlayer.vx < 0;
           playerEntity.play(pstate);
-          playerEntity.draw(vctx, px, py, { anchor: 'bottom', scale: 1, flip });
+          // collect draw descriptors and perform a batched draw pass grouped by source image
+          const descs = playerEntity.collectDrawDescriptors(px, py, { anchor: 'bottom', scale: 1, flip });
+          const groups = new Map<HTMLImageElement, typeof descs>();
+          for (const d of descs) {
+            if (!d.img) continue;
+            let g = groups.get(d.img);
+            if (!g) {
+              g = [] as typeof descs;
+              groups.set(d.img, g);
+            }
+            g.push(d);
+          }
+          for (const [img, items] of groups) {
+            for (const it of items) {
+              vctx.save();
+              vctx.globalAlpha = it.alpha;
+              if (it.flip) {
+                vctx.translate(it.dx + it.dw / 2, 0);
+                vctx.scale(-1, 1);
+                vctx.translate(-(it.dx + it.dw / 2), 0);
+              }
+              vctx.drawImage(img, it.sx, it.sy, it.sw, it.sh, it.dx, it.dy, it.dw, it.dh);
+              vctx.restore();
+            }
+          }
         } else {
           vctx.fillStyle = '#fff';
           vctx.fillRect(px - 8, py - 8, 16, 16);
