@@ -4,7 +4,7 @@ import { createPlayer, Player, PHYS, PLAYER_DEFAULTS } from './player';
 import sampleLevel from './levels/sample-level';
 import assetManager from './assetManager';
 import audioManager from './audioManager';
-import { createSpriteSheet, AnimatedSprite } from './sprite';
+import { createSpriteSheet, AnimatedSprite, AnimationStateMachine } from './sprite';
 import { getHeightAtX, getSlopeAtX } from './heightmap';
 
 const VIRTUAL_WIDTH = 400;
@@ -90,11 +90,34 @@ export default function Game() {
           const pImg = await assetManager.loadImage('sprites/player.png').catch(() => null);
           if (pImg) {
             const sheet = createSpriteSheet(pImg, 32, 32);
-            playerSprite = new AnimatedSprite(sheet);
-            playerSprite.addAnim('idle', [0], 6, true);
+            const base = new AnimatedSprite(sheet);
+            base.addAnim('idle', [0], 6, true);
             const runFrames: number[] = [];
             for (let i = 1; i <= Math.min(4, sheet.frameCount - 1); i++) runFrames.push(i);
-            if (runFrames.length > 0) playerSprite.addAnim('run', runFrames, 14, true);
+            if (runFrames.length > 0) base.addAnim('run', runFrames, 14, true);
+            if (sheet.frameCount > 5) base.addAnim('jump', [5], 12, false);
+            if (sheet.frameCount > 6) base.addAnim('fall', [6], 12, false);
+            const entity = new AnimationStateMachine();
+            entity.addLayer(base, { fallback: 'idle' }, 0, 0);
+            // try load an accessory overlay (hat/gear) that aligns with same frames
+            try {
+              const acc = await assetManager.loadImage('sprites/player_hat.png').catch(() => null);
+              if (acc) {
+                const accSheet = createSpriteSheet(acc, 32, 32);
+                const accSprite = new AnimatedSprite(accSheet);
+                // mirror animations from base where possible
+                accSprite.addAnim('idle', [0], 6, true);
+                if (accSheet.frameCount > 1) {
+                  const f: number[] = [];
+                  for (let i = 1; i <= Math.min(4, accSheet.frameCount - 1); i++) f.push(i);
+                  if (f.length) accSprite.addAnim('run', f, 14, true);
+                }
+                entity.addLayer(accSprite, { fallback: 'idle' }, 0, -8);
+              }
+            } catch (e) {
+              /* ignore accessory */
+            }
+            playerEntity = entity;
           }
         } catch (e) {
           // ignore — sprite optional
@@ -152,8 +175,8 @@ export default function Game() {
     let fps = 60;
     // parallax layers: images and scroll factors
     const parallax: Array<{ img: HTMLImageElement | null; factor: number; yOff: number }> = [];
-    // optional player sprite (loaded during level asset loading)
-    let playerSprite: AnimatedSprite | null = null;
+    // optional player entity (layered sprite + state machine)
+    let playerEntity: AnimationStateMachine | null = null;
     // sound hooks (populated during loading)
     let sfxJump: any = null;
     let sfxLand: any = null;
@@ -363,7 +386,7 @@ export default function Game() {
       }
 
       // advance player sprite animation (if present)
-      playerSprite?.update(dt);
+      playerEntity?.update(dt);
 
       // camera follows player with look-ahead and smoothing, clamped to level bounds
       const levelWidth = (sampleLevel.meta && sampleLevel.meta.width) || (sampleLevel.segments && sampleLevel.segments.length) || VIRTUAL_WIDTH;
@@ -485,14 +508,24 @@ export default function Game() {
       // player draw (sprite if available, otherwise simple placeholder)
       const px = Math.round(ix - camOffsetX);
       const py = Math.round(iy);
-      if (playerSprite) {
-        // choose animation based on velocity
-        if (currPlayer.vx > 20 && currPlayer.grounded) playerSprite.play('run');
-        else playerSprite.play('idle');
-        playerSprite.draw(vctx, px, py, { anchor: 'bottom', scale: 1 });
-      } else {
-        vctx.fillStyle = '#fff';
-        vctx.fillRect(px - 8, py - 8, 16, 16);
+      // cull off-screen player draws for performance
+      if (px >= -64 && px <= VIRTUAL_WIDTH + 64) {
+        if (playerEntity) {
+          // choose animation state based on player physics
+          let pstate = 'idle';
+          if (!currPlayer.grounded) {
+            pstate = currPlayer.vy < 0 ? 'jump' : 'fall';
+          } else {
+            pstate = currPlayer.vx > 20 ? 'run' : 'idle';
+          }
+          const flip = currPlayer.vx < 0;
+          playerEntity.play(pstate);
+          playerEntity.draw(vctx, px, py, { anchor: 'bottom', scale: 1, flip });
+        } else {
+          vctx.fillStyle = '#fff';
+          vctx.fillRect(px - 8, py - 8, 16, 16);
+        }
+
       }
 
       // landing flash overlay
