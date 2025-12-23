@@ -6,6 +6,7 @@ import assetManager from './assetManager';
 import audioManager from './audioManager';
 import { createSpriteSheet, AnimatedSprite, AnimationStateMachine } from './sprite';
 import { loadParallaxLayers, ParallaxLayer } from './parallax';
+import EffectsManager from './effects';
 import { getHeightAtX, getSlopeAtX } from './heightmap';
 
 const VIRTUAL_WIDTH = 400;
@@ -167,6 +168,8 @@ export default function Game() {
     let fps = 60;
     // parallax layers: images and scroll factors
     const parallax: ParallaxLayer[] = [];
+    // visual effects (dust, speed lines, screen shake)
+    const effects = new EffectsManager({ enabled: true });
     // optional player entity (layered sprite + state machine)
     let playerEntity: AnimationStateMachine | null = null;
     // sound hooks (populated during loading)
@@ -294,6 +297,12 @@ export default function Game() {
           currPlayer.invulnTimer = 0.5;
           // play landing sound
           void sfxLand?.play?.();
+          // visual effects: dust and shake
+          try {
+            effects.onLand(currPlayer.x, currPlayer.y, currPlayer.vx);
+          } catch (e) {
+            /* ignore */
+          }
         }
       } else {
         // became airborne this frame?
@@ -379,6 +388,12 @@ export default function Game() {
 
       // advance player sprite animation (if present)
       playerEntity?.update(dt);
+      // update visual effects
+      try {
+        effects.update(dt);
+      } catch (e) {
+        // ignore
+      }
 
       // camera follows player with look-ahead and smoothing, clamped to level bounds
       const levelWidth = (sampleLevel.meta && sampleLevel.meta.width) || (sampleLevel.segments && sampleLevel.segments.length) || VIRTUAL_WIDTH;
@@ -413,6 +428,11 @@ export default function Game() {
       vctx.fillStyle = '#0b1220';
       vctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
 
+      // apply screen-shake offset to camera when rendering
+      const shakeX = (effects && effects.shake && effects.shake.x) || 0;
+      const shakeY = (effects && effects.shake && effects.shake.y) || 0;
+      const camxShaken = camx + shakeX;
+
       // draw parallax background layers (back-to-front)
       if (parallax.length > 0) {
         for (let li = 0; li < parallax.length; li++) {
@@ -420,10 +440,10 @@ export default function Game() {
           if (!layer || !layer.img) continue;
           const img = layer.img;
           const factor = layer.factor || 0.5;
-          const yOff = layer.yOff || 0;
+          const yOff = (layer.yOff || 0) + shakeY;
           // tile image horizontally to fill view
           const imgW = img.width || VIRTUAL_WIDTH;
-          const scroll = (camx * factor) % imgW;
+          const scroll = (camxShaken * factor) % imgW;
           // draw enough tiles to cover screen
           for (let x = -imgW; x < VIRTUAL_WIDTH + imgW; x += imgW) {
             vctx.drawImage(img, Math.round(x - scroll), Math.round(yOff));
@@ -431,13 +451,13 @@ export default function Game() {
         }
       }
 
-      // compute camera offset (centered)
-      let camOffsetX = camx - VIRTUAL_WIDTH / 2;
+      // compute camera offset (centered) including shake
+      let camOffsetX = camxShaken - VIRTUAL_WIDTH / 2;
       if (RENDER.PIXEL_SNAP) camOffsetX = Math.round(camOffsetX);
 
       // compute visible segment range for culling
-      const leftWorld = camx - VIRTUAL_WIDTH / 2;
-      const rightWorld = camx + VIRTUAL_WIDTH / 2;
+      const leftWorld = camxShaken - VIRTUAL_WIDTH / 2;
+      const rightWorld = camxShaken + VIRTUAL_WIDTH / 2;
       const leftIdx = Math.max(0, Math.floor(leftWorld) - RENDER.PADDING);
       const rightIdx = Math.min((sampleLevel.segments && sampleLevel.segments.length - 1) || 0, Math.ceil(rightWorld) + RENDER.PADDING);
 
@@ -499,16 +519,22 @@ export default function Game() {
 
       // player draw (sprite if available, otherwise simple placeholder)
       const px = Math.round(ix - camOffsetX);
-      const py = Math.round(iy);
+      const py = Math.round(iy - (shakeY || 0));
       // cull off-screen player draws for performance
       if (px >= -64 && px <= VIRTUAL_WIDTH + 64) {
-        if (playerEntity) {
+          if (playerEntity) {
           // choose animation state based on player physics
           let pstate = 'idle';
           if (!currPlayer.grounded) {
             pstate = currPlayer.vy < 0 ? 'jump' : 'fall';
           } else {
             pstate = currPlayer.vx > 20 ? 'run' : 'idle';
+            // speed lines / motion streaks
+            try {
+              effects.onSpeed(currPlayer.x, currPlayer.y, currPlayer.vx);
+            } catch (e) {
+              /* ignore */
+            }
           }
           const flip = currPlayer.vx < 0;
           playerEntity.play(pstate);
@@ -542,6 +568,13 @@ export default function Game() {
           vctx.fillRect(px - 8, py - 8, 16, 16);
         }
 
+      }
+
+      // draw effects (particles) after main scene but before overlays
+      try {
+        effects.draw(vctx, camOffsetX, shakeY || 0);
+      } catch (e) {
+        /* ignore */
       }
 
       // landing flash overlay
