@@ -5,6 +5,7 @@ import sampleLevel from './levels/sample-level';
 import assetManager from './assetManager';
 import audioManager from './audioManager';
 import { createSpriteSheet, AnimatedSprite, AnimationStateMachine } from './sprite';
+import { loadParallaxLayers, ParallaxLayer } from './parallax';
 import { getHeightAtX, getSlopeAtX } from './heightmap';
 
 const VIRTUAL_WIDTH = 400;
@@ -68,20 +69,11 @@ export default function Game() {
         } catch (e) {
           // ignore — sounds will be null
         }
-        // Load parallax layers from meta (optional)
+        // Load parallax layers from meta (optional) via helper
         try {
-          const layers: any[] = meta.parallax || meta.layers || [];
-          for (const L of layers) {
-            const src = typeof L === 'string' ? L : L.src;
-            const factor = (L && L.factor) || (typeof L === 'string' ? 0.2 : 0.5);
-            const yOff = (L && L.y) || 0;
-            try {
-              const img = await assetManager.loadImage(src);
-              parallax.push({ img, factor, yOff });
-            } catch (e) {
-              parallax.push({ img: null, factor, yOff });
-            }
-          }
+          const layersSpec: any[] = meta.parallax || meta.layers || [];
+          const loaded = await loadParallaxLayers(assetManager, layersSpec);
+          parallax.push(...loaded);
         } catch (e) {
           // ignore
         }
@@ -174,7 +166,7 @@ export default function Game() {
     let landingFlash = 0; // seconds of white flash on landing
     let fps = 60;
     // parallax layers: images and scroll factors
-    const parallax: Array<{ img: HTMLImageElement | null; factor: number; yOff: number }> = [];
+    const parallax: ParallaxLayer[] = [];
     // optional player entity (layered sprite + state machine)
     let playerEntity: AnimationStateMachine | null = null;
     // sound hooks (populated during loading)
