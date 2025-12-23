@@ -8,6 +8,7 @@ import { createSpriteSheet, AnimatedSprite, AnimationStateMachine } from './spri
 import { loadParallaxLayers, ParallaxLayer } from './parallax';
 import EffectsManager from './effects';
 import { getHeightAtX, getSlopeAtX } from './heightmap';
+import { startEditor } from './editor';
 
 const VIRTUAL_WIDTH = 400;
 const VIRTUAL_HEIGHT = 225;
@@ -163,6 +164,9 @@ export default function Game() {
     let lastGroundY: number | null = null;
     let lastGroundAngle = 0;
     let ledgeGrace = 0; // seconds to preserve grounded pose after leaving ground
+    // debug tracked values
+    let lastSlope = 0;
+    let lastAccelAlong = 0;
     // debug / effects
     let landingFlash = 0; // seconds of white flash on landing
     // crash / respawn visuals
@@ -171,6 +175,7 @@ export default function Game() {
     let fps = 60;
     // editor state tracking
     let lastNonEditorState: GameState = stateRef.current;
+    let editorStop: any = null;
     // parallax layers: images and scroll factors
     const parallax: ParallaxLayer[] = [];
     // visual effects (dust, speed lines, screen shake)
@@ -281,7 +286,11 @@ export default function Game() {
         // grounded motion: acceleration along slope from gravity projection
         const slope = getSlopeAtX(sampleLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
         const slopeMag = slope;
-        const accelAlong = -PHYS.GRAVITY * slopeMag / Math.sqrt(1 + slopeMag * slopeMag);
+        // gravity component along slope: positive when slope > 0 (downhill to the right)
+        const accelAlong = PHYS.GRAVITY * slopeMag / Math.sqrt(1 + slopeMag * slopeMag);
+        // record for debug overlay
+        lastSlope = slope;
+        lastAccelAlong = accelAlong;
         currPlayer.vx += accelAlong * dt;
 
         // input speed modifiers and braking
@@ -686,7 +695,8 @@ export default function Game() {
       vctx.fillText(`Player: x=${ix.toFixed(1)} y=${iy.toFixed(1)}`, 12, 36);
       vctx.fillText(`Vel: vx=${currPlayer.vx.toFixed(1)} vy=${currPlayer.vy.toFixed(1)}`, 12, 50);
       vctx.fillText(`Grounded: ${currPlayer.grounded}`, 12, 64);
-      vctx.fillText(`CamX: ${camx.toFixed(1)}`, 12, 78);
+      vctx.fillText(`Slope: ${lastSlope.toFixed(3)}  Accel: ${lastAccelAlong.toFixed(2)} (${lastAccelAlong >= 0 ? '+' : '-'})`, 12, 78);
+      vctx.fillText(`CamX: ${camx.toFixed(1)}`, 12, 92);
 
       vctx.fillStyle = '#fff';
       vctx.font = '14px monospace';
@@ -761,6 +771,15 @@ export default function Game() {
         vctx.fillText('EDITOR MODE', bx + bw / 2, by + 15);
         vctx.textAlign = 'left';
         vctx.restore();
+      }
+
+      // call editor overlay renderer if present
+      try {
+        if (typeof editorStop !== 'undefined' && editorStop && (editorStop as any).renderOverlay) {
+          (editorStop as any).renderOverlay(vctx, camxShaken, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        }
+      } catch (e) {
+        // ignore overlay errors
       }
 
       // compute scale to fit window while preserving aspect ratio (letterboxing)
@@ -875,6 +894,45 @@ export default function Game() {
         prevCam = { ...currCam };
         accumulator = 0;
         lastTime = now;
+        // start/stop editor when entering/exiting editor state
+        try {
+          const canvasElInner = canvasRef.current!;
+          if (typeof EDITOR_ENABLED !== 'undefined' && EDITOR_ENABLED) {
+            if (stateRef.current === 'editor') {
+              if (!editorStop) {
+                canvasElInner.dataset.editorActive = '1';
+                editorStop = startEditor({
+                  canvas: canvasElInner,
+                  screenToWorld: (clientX: number, clientY: number) => {
+                    // map client coords -> virtual world coords
+                    const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
+                    const destW = VIRTUAL_WIDTH * scale;
+                    const destH = VIRTUAL_HEIGHT * scale;
+                    const destX = (window.innerWidth - destW) / 2;
+                    const destY = (window.innerHeight - destH) / 2;
+                    const px = (clientX - destX) / scale;
+                    const py = (clientY - destY) / scale;
+                    // world x relative to camera
+                    const camOffsetX = currCam.x - VIRTUAL_WIDTH / 2;
+                    return { x: px + camOffsetX, y: py };
+                  },
+                  level: sampleLevel as any,
+                  onChange() {
+                    // noop for now; could mark level dirty
+                  },
+                });
+              }
+            } else {
+              if (editorStop) {
+                try { if (canvasRef.current) canvasRef.current.dataset.editorActive = '0'; } catch (e) { }
+                try { editorStop(); } catch (e) { }
+                editorStop = null;
+              }
+            }
+          }
+        } catch (e) {
+          // ignore editor start errors
+        }
       }
 
       if (stateRef.current === 'playing') {
