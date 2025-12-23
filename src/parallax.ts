@@ -15,7 +15,7 @@ export async function loadParallaxLayers(assetMgr: any, layersSpec: any[] = []):
     const src = typeof L === 'string' ? L : L && L.src;
     const factor = (L && (L.factor ?? L.scrollFactor)) ?? (typeof L === 'string' ? 0.5 : 0.5);
     const yOff = (L && L.y) ?? 0;
-    const tile = (L && (typeof L.tile === 'boolean' ? L.tile : true));
+    const tile = L && (typeof L.tile === 'boolean' ? L.tile : true);
     const alpha = (L && L.alpha) ?? 1;
     if (!src) {
       out.push({ img: null, factor, yOff, tile, alpha });

@@ -13,7 +13,7 @@ for (let i = 0; i < TOTAL; i++) {
 
 export const sampleLevel: Level = {
   version: 1,
-  meta: ({
+  meta: {
     title: 'Sample Level 1',
     author: 'auto',
     width: SEGMENTS.length,
@@ -24,7 +24,7 @@ export const sampleLevel: Level = {
       { src: 'parallax/mid.svg', factor: 0.35, y: 42, tile: true, alpha: 1 },
       { src: 'parallax/fg.svg', factor: 0.7, y: 80, tile: true, alpha: 1 },
     ],
-  } as any),
+  } as any,
   segments: SEGMENTS,
   objects: [
     { type: 'start', x: 40 },

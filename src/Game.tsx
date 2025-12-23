@@ -187,26 +187,34 @@ export default function Game() {
     let coyoteTimer = 0;
     let jumpBuffer = 0;
     let jumpHold = 0;
+    let jumpLock = 0; // short timer to prevent immediate re-grounding after jump
     // checkpoint / finish / death
     const startObj = (sampleLevel.objects || []).find((o) => o.type === 'start');
     let lastCheckpointX = startObj ? startObj.x : currPlayer.x;
     let reachedFinish = false;
     let deathTimer = 0; // delay before auto-respawn
+    // debug logging accumulator
+    // debug logging accumulator (removed)
 
     function respawn() {
       const rx = lastCheckpointX ?? PLAYER_DEFAULTS.startX;
       currPlayer.x = rx;
       const hy = getHeightAtX(sampleLevel as any, rx);
-      currPlayer.y = hy !== null ? hy : PLAYER_DEFAULTS.startY;
+      // place player slightly above ground so feet sit on the surface rather than inside it
+      const FEET_OFFSET = 8; // virtual pixels from contact height to player's origin
+      currPlayer.y = hy !== null ? hy - FEET_OFFSET : PLAYER_DEFAULTS.startY;
       currPlayer.vx = PHYS.BASE_CRUISE_SPEED;
       currPlayer.vy = 0;
       currPlayer.angle = getSlopeAtX(sampleLevel as any, rx) ?? 0;
-      currPlayer.grounded = true;
-      currPlayer.wasGrounded = true;
+      // start slightly above ground and mark airborne so we don't snap into the ground
+      currPlayer.grounded = false;
+      currPlayer.wasGrounded = false;
+      lastGroundY = null;
       currPlayer.invulnTimer = 0.5;
       prevPlayer = { ...currPlayer };
       currCam.x = currPlayer.x;
       prevCam = { ...currCam };
+      // respawn
       // resume play
       stateRef.current = 'playing';
       reachedFinish = false;
@@ -223,18 +231,36 @@ export default function Game() {
       coyoteTimer = Math.max(0, coyoteTimer - dt);
       jumpBuffer = Math.max(0, jumpBuffer - dt);
       jumpHold = Math.max(0, jumpHold - dt);
+      // periodic debug log to help diagnose speed/control issues
+      // debug logging removed
+      // respawn
+      // decay jump lock
+      jumpLock = Math.max(0, jumpLock - dt);
       const hb = getHeightAtX(sampleLevel as any, backX);
       const hf = getHeightAtX(sampleLevel as any, frontX);
 
       currPlayer.wasGrounded = currPlayer.grounded;
 
-      if (hb !== null && hf !== null) {
-        // grounded: y is average of contacts, angle from line
-        const avgY = (hb + hf) / 2;
-        currPlayer.y = avgY;
+      // Determine whether we're grounded: require both contact samples exist AND
+      // that the player was already grounded or is physically near the contact height.
+      let avgY: number | null = null;
+      const contactExists = hb !== null && hf !== null;
+      if (contactExists) {
+        avgY = (hb + hf) / 2;
+      }
+
+      const NEAR_GROUND_THRESHOLD = 6; // pixels
+      const nearGround = avgY !== null && currPlayer.y >= (avgY - NEAR_GROUND_THRESHOLD);
+
+      if (contactExists && (currPlayer.wasGrounded || nearGround) && jumpLock <= 0) {
+        // grounded: snap to contact average, reset vertical velocity and set angle
+        currPlayer.y = avgY!;
         currPlayer.vy = 0;
         currPlayer.grounded = true;
-        currPlayer.angle = Math.atan2(hf - hb, frontX - backX);
+        currPlayer.angle = Math.atan2((hf as number) - (hb as number), frontX - backX);
+
+        // debug: log before movement step in grounded branch
+        // grounded branch
 
         // grounded motion: acceleration along slope from gravity projection
         const slope = getSlopeAtX(sampleLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
@@ -287,13 +313,44 @@ export default function Game() {
         if (currPlayer.vx > PHYS.MAX_SPEED) currPlayer.vx = PHYS.MAX_SPEED;
         if (currPlayer.vx < 0) currPlayer.vx = 0;
 
+        // prepare coyote timer (allow jump shortly after leaving ground)
+        coyoteTimer = JUMP.COYOTE_TIME;
+
+        // jump from grounded: immediate if pressed
+        const jumpPressedGround = input.get(' ').wasPressed || input.get('ArrowUp').wasPressed || input.get('w').wasPressed;
+        if (jumpPressedGround) {
+          currPlayer.vy = -PHYS.JUMP_IMPULSE;
+          currPlayer.grounded = false;
+          jumpHold = PHYS.JUMP_HOLD_TIME;
+          jumpLock = 0.18;
+          // play sfx
+          void sfxJump?.play?.();
+          // jump applied
+          // immediately integrate a small vertical step so height sampling doesn't re-detect ground
+          try {
+            currPlayer.y += currPlayer.vy * dt;
+            lastGroundY = null;
+            ledgeGrace = 0;
+          } catch (e) { }
+        }
+
+        // advance horizontal position while grounded
+        // advance horizontal position while grounded
+        currPlayer.x += currPlayer.vx * dt;
+
+        // update last ground pose
         // update last ground pose
         lastGroundY = avgY;
         lastGroundAngle = currPlayer.angle;
         ledgeGrace = 0;
         // landing detection: if we were airborne last fixed-step, trigger land event
         if (!currPlayer.wasGrounded && currPlayer.grounded) {
-          landingFlash = 0.12;
+          // only show a white landing flash for harder impacts; keep dust/particles always
+          const impactVel = Math.abs(prevPlayer.vy || 0);
+          const FLASH_IMPACT_THRESHOLD = 450; // require a harder impact to show flash
+          if (impactVel > FLASH_IMPACT_THRESHOLD) {
+            landingFlash = 0.12;
+          }
           currPlayer.invulnTimer = 0.5;
           // play landing sound
           void sfxLand?.play?.();
@@ -323,6 +380,7 @@ export default function Game() {
             currPlayer.angle = lastGroundAngle;
           }
           // still advance horizontal position
+          // before airborne-preserve move
           currPlayer.x += currPlayer.vx * dt;
           // don't modify vy yet
         } else {
@@ -345,6 +403,8 @@ export default function Game() {
           const holdingJump = jumpHold > 0 && (input.get(' ').isDown || input.get('ArrowUp').isDown || input.get('w').isDown);
           const gravityFactor = holdingJump ? JUMP.HOLD_GRAVITY_FACTOR : 1;
           currPlayer.vy += PHYS.GRAVITY * gravityFactor * dt;
+          // debug: before airborne integration
+          // before airborne integration
           currPlayer.x += currPlayer.vx * dt;
           currPlayer.y += currPlayer.vy * dt;
         }
@@ -522,7 +582,7 @@ export default function Game() {
       const py = Math.round(iy - (shakeY || 0));
       // cull off-screen player draws for performance
       if (px >= -64 && px <= VIRTUAL_WIDTH + 64) {
-          if (playerEntity) {
+        if (playerEntity) {
           // choose animation state based on player physics
           let pstate = 'idle';
           if (!currPlayer.grounded) {
@@ -564,8 +624,9 @@ export default function Game() {
             }
           }
         } else {
+          // placeholder: treat `py` as the player's bottom so the square sits on the ground
           vctx.fillStyle = '#fff';
-          vctx.fillRect(px - 8, py - 8, 16, 16);
+          vctx.fillRect(px - 8, py - 16, 16, 16);
         }
 
       }
