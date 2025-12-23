@@ -169,6 +169,8 @@ export default function Game() {
     let crashFade = 0; // seconds of crash fade overlay (counts down)
     let crashTimer = 0; // time until auto-respawn after crash
     let fps = 60;
+    // editor state tracking
+    let lastNonEditorState: GameState = stateRef.current;
     // parallax layers: images and scroll factors
     const parallax: ParallaxLayer[] = [];
     // visual effects (dust, speed lines, screen shake)
@@ -359,29 +361,29 @@ export default function Game() {
         ledgeGrace = 0;
         // landing detection: if we were airborne last fixed-step, trigger land event
         if (!currPlayer.wasGrounded && currPlayer.grounded) {
-            // only show a white landing flash for harder impacts; keep dust/particles always
-            const impactVel = Math.abs(prevPlayer.vy || 0);
-            const FLASH_IMPACT_THRESHOLD = 450; // require a harder impact to show flash
-            const CRASH_IMPACT_THRESHOLD = 820; // above this, treat as a crash
-            if (impactVel > CRASH_IMPACT_THRESHOLD && (currPlayer.invulnTimer <= 0)) {
-              // trigger crash: brief fade-out and schedule respawn
-              stateRef.current = 'dead';
-              crashFade = 0.6;
-              crashTimer = 0.9;
-              // play death sound
-              void sfxDeath?.play?.();
-            } else {
-              if (impactVel > FLASH_IMPACT_THRESHOLD) landingFlash = 0.12;
-              currPlayer.invulnTimer = 0.5;
-              // play landing sound
-              void sfxLand?.play?.();
-              // visual effects: dust and shake
-              try {
-                effects.onLand(currPlayer.x, currPlayer.y, currPlayer.vx);
-              } catch (e) {
-                /* ignore */
-              }
+          // only show a white landing flash for harder impacts; keep dust/particles always
+          const impactVel = Math.abs(prevPlayer.vy || 0);
+          const FLASH_IMPACT_THRESHOLD = 450; // require a harder impact to show flash
+          const CRASH_IMPACT_THRESHOLD = 820; // above this, treat as a crash
+          if (impactVel > CRASH_IMPACT_THRESHOLD && (currPlayer.invulnTimer <= 0)) {
+            // trigger crash: brief fade-out and schedule respawn
+            stateRef.current = 'dead';
+            crashFade = 0.6;
+            crashTimer = 0.9;
+            // play death sound
+            void sfxDeath?.play?.();
+          } else {
+            if (impactVel > FLASH_IMPACT_THRESHOLD) landingFlash = 0.12;
+            currPlayer.invulnTimer = 0.5;
+            // play landing sound
+            void sfxLand?.play?.();
+            // visual effects: dust and shake
+            try {
+              effects.onLand(currPlayer.x, currPlayer.y, currPlayer.vx);
+            } catch (e) {
+              /* ignore */
             }
+          }
         }
       } else {
         // became airborne this frame?
@@ -462,7 +464,7 @@ export default function Game() {
         void sfxDeath?.play?.();
       }
 
-      
+
 
       // advance player sprite animation (if present)
       playerEntity?.update(dt);
@@ -742,6 +744,25 @@ export default function Game() {
         vctx.textAlign = 'left';
       }
 
+      // Editor mode indicator (visible only when in editor state)
+      if (stateRef.current === 'editor') {
+        vctx.save();
+        const bw = 100;
+        const bh = 22;
+        const bx = VIRTUAL_WIDTH - bw - 10;
+        const by = 8;
+        vctx.fillStyle = 'rgba(0,0,0,0.55)';
+        vctx.fillRect(bx, by, bw, bh);
+        vctx.strokeStyle = 'rgba(255,215,0,0.9)';
+        vctx.strokeRect(bx, by, bw, bh);
+        vctx.fillStyle = '#ffd700';
+        vctx.font = '12px monospace';
+        vctx.textAlign = 'center';
+        vctx.fillText('EDITOR MODE', bx + bw / 2, by + 15);
+        vctx.textAlign = 'left';
+        vctx.restore();
+      }
+
       // compute scale to fit window while preserving aspect ratio (letterboxing)
       const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
       const destW = Math.round(VIRTUAL_WIDTH * scale);
@@ -815,6 +836,7 @@ export default function Game() {
       const rPressed = input.get('r').wasPressed;
       const startPressed = input.get(' ').wasPressed;
       const crashKey = input.get('k').wasPressed;
+      const ePressed = input.get('e').wasPressed;
       if (rPressed) {
         // force respawn / restart
         respawn();
@@ -833,6 +855,16 @@ export default function Game() {
       if (stateRef.current === 'title' && startPressed) {
         respawn();
         stateRef.current = 'playing';
+      }
+
+      // toggle editor state when compile-time enabled
+      if (ePressed && typeof EDITOR_ENABLED !== 'undefined' && EDITOR_ENABLED) {
+        if (stateRef.current !== 'editor') {
+          lastNonEditorState = stateRef.current;
+          stateRef.current = 'editor';
+        } else {
+          stateRef.current = lastNonEditorState || 'title';
+        }
       }
 
       // detect simple game-state transitions and reset timing to avoid large accumulator
