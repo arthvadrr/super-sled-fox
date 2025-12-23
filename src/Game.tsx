@@ -166,7 +166,14 @@ export default function Game() {
     let ledgeGrace = 0; // seconds to preserve grounded pose after leaving ground
     // debug tracked values
     let lastSlope = 0;
-    let lastAccelAlong = 0;
+    let lastSlopeEff = 0;
+    let lastAccelRaw = 0;
+    let lastAccelScaled = 0;
+    // tuning constants for slope and motor
+    const SLOPE_SCALE = 0.35;
+    const MAX_SLOPE = 1.5;
+    const MOTOR_K = 6;
+    const MOTOR_MAX = 250;
     // debug / effects
     let landingFlash = 0; // seconds of white flash on landing
     // crash / respawn visuals
@@ -285,13 +292,14 @@ export default function Game() {
 
         // grounded motion: acceleration along slope from gravity projection
         const slope = getSlopeAtX(sampleLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
-        const slopeMag = slope;
-        // gravity component along slope: positive when slope > 0 (downhill to the right)
-        const accelAlong = PHYS.GRAVITY * slopeMag / Math.sqrt(1 + slopeMag * slopeMag);
-        // record for debug overlay
         lastSlope = slope;
-        lastAccelAlong = accelAlong;
-        currPlayer.vx += accelAlong * dt;
+        // clamp slope for safety and compute gravity projection
+        const slopeEff = Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, slope));
+        lastSlopeEff = slopeEff;
+        const accelRaw = PHYS.GRAVITY * slopeEff / Math.sqrt(1 + slopeEff * slopeEff);
+        const accelScaled = accelRaw * SLOPE_SCALE;
+        lastAccelRaw = accelRaw;
+        lastAccelScaled = accelScaled;
 
         // input speed modifiers and braking
         const forward = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
@@ -302,6 +310,21 @@ export default function Game() {
 
         // target cruise speed modified by input
         const targetSpeed = PHYS.BASE_CRUISE_SPEED * speedMul;
+
+        // forward motor assist (grounded only)
+        let motorAccel = 0;
+        if (forward && !back) {
+          motorAccel = Math.max(0, Math.min(MOTOR_MAX, (targetSpeed - currPlayer.vx) * MOTOR_K));
+        }
+
+        // apply slope gravity (scaled)
+        currPlayer.vx += accelScaled * dt;
+        // apply motor assist but do not exceed targetSpeed
+        if (motorAccel > 0) {
+          const maxDelta = Math.max(0, targetSpeed - currPlayer.vx);
+          const applied = Math.min(motorAccel * dt, maxDelta);
+          currPlayer.vx += applied;
+        }
 
         // braking only for back: if back pressed and vx > target, decelerate; never reverse to negative
         if (back) {
@@ -695,8 +718,9 @@ export default function Game() {
       vctx.fillText(`Player: x=${ix.toFixed(1)} y=${iy.toFixed(1)}`, 12, 36);
       vctx.fillText(`Vel: vx=${currPlayer.vx.toFixed(1)} vy=${currPlayer.vy.toFixed(1)}`, 12, 50);
       vctx.fillText(`Grounded: ${currPlayer.grounded}`, 12, 64);
-      vctx.fillText(`Slope: ${lastSlope.toFixed(3)}  Accel: ${lastAccelAlong.toFixed(2)} (${lastAccelAlong >= 0 ? '+' : '-'})`, 12, 78);
-      vctx.fillText(`CamX: ${camx.toFixed(1)}`, 12, 92);
+      vctx.fillText(`Slope:${lastSlope.toFixed(3)} eff:${lastSlopeEff.toFixed(3)}`, 12, 78);
+      vctx.fillText(`Acc raw:${lastAccelRaw.toFixed(1)} scaled:${lastAccelScaled.toFixed(1)} ${lastAccelScaled >= 0 ? '+' : '-'}`, 12, 92);
+      vctx.fillText(`CamX: ${camx.toFixed(1)}`, 12, 106);
 
       vctx.fillStyle = '#fff';
       vctx.font = '14px monospace';
