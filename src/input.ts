@@ -1,4 +1,4 @@
-export type KeyName = 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown' | 'w' | 'a' | 's' | 'd' | ' ' | 'Escape' | 'r' | 'e' | 'F1';
+export type KeyName = 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown' | 'w' | 'a' | 's' | 'd' | 'k' | ' ' | 'Escape' | 'r' | 'e' | 'F1';
 
 type KeyState = {
   isDown: boolean;
@@ -6,7 +6,7 @@ type KeyState = {
   wasReleased: boolean;
 };
 
-const DEFAULT_KEYS: KeyName[] = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'w', 'a', 's', 'd', ' ', 'Escape', 'r', 'e', 'F1'];
+const DEFAULT_KEYS: KeyName[] = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'w', 'a', 's', 'd', 'k', ' ', 'Escape', 'r', 'e', 'F1'];
 
 export class InputManager {
   private keys = new Map<KeyName, KeyState>();

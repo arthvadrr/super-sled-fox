@@ -165,6 +165,9 @@ export default function Game() {
     let ledgeGrace = 0; // seconds to preserve grounded pose after leaving ground
     // debug / effects
     let landingFlash = 0; // seconds of white flash on landing
+    // crash / respawn visuals
+    let crashFade = 0; // seconds of crash fade overlay (counts down)
+    let crashTimer = 0; // time until auto-respawn after crash
     let fps = 60;
     // parallax layers: images and scroll factors
     const parallax: ParallaxLayer[] = [];
@@ -210,7 +213,7 @@ export default function Game() {
       currPlayer.grounded = false;
       currPlayer.wasGrounded = false;
       lastGroundY = null;
-      currPlayer.invulnTimer = 0.5;
+      currPlayer.invulnTimer = 1.0; // grant a short invulnerability window after respawn
       prevPlayer = { ...currPlayer };
       currCam.x = currPlayer.x;
       prevCam = { ...currCam };
@@ -219,6 +222,15 @@ export default function Game() {
       stateRef.current = 'playing';
       reachedFinish = false;
       deathTimer = 0;
+    }
+
+    // Developer test helper: trigger a crash/fall sequence programmatically
+    function triggerCrash() {
+      if (stateRef.current === 'dead') return;
+      stateRef.current = 'dead';
+      crashFade = 0.6;
+      crashTimer = 0.9;
+      void sfxDeath?.play?.();
     }
 
     // simulation step (fixed dt seconds)
@@ -231,6 +243,8 @@ export default function Game() {
       coyoteTimer = Math.max(0, coyoteTimer - dt);
       jumpBuffer = Math.max(0, jumpBuffer - dt);
       jumpHold = Math.max(0, jumpHold - dt);
+      // decrement invulnerability timer
+      currPlayer.invulnTimer = Math.max(0, (currPlayer.invulnTimer || 0) - dt);
       // periodic debug log to help diagnose speed/control issues
       // debug logging removed
       // respawn
@@ -345,21 +359,29 @@ export default function Game() {
         ledgeGrace = 0;
         // landing detection: if we were airborne last fixed-step, trigger land event
         if (!currPlayer.wasGrounded && currPlayer.grounded) {
-          // only show a white landing flash for harder impacts; keep dust/particles always
-          const impactVel = Math.abs(prevPlayer.vy || 0);
-          const FLASH_IMPACT_THRESHOLD = 450; // require a harder impact to show flash
-          if (impactVel > FLASH_IMPACT_THRESHOLD) {
-            landingFlash = 0.12;
-          }
-          currPlayer.invulnTimer = 0.5;
-          // play landing sound
-          void sfxLand?.play?.();
-          // visual effects: dust and shake
-          try {
-            effects.onLand(currPlayer.x, currPlayer.y, currPlayer.vx);
-          } catch (e) {
-            /* ignore */
-          }
+            // only show a white landing flash for harder impacts; keep dust/particles always
+            const impactVel = Math.abs(prevPlayer.vy || 0);
+            const FLASH_IMPACT_THRESHOLD = 450; // require a harder impact to show flash
+            const CRASH_IMPACT_THRESHOLD = 820; // above this, treat as a crash
+            if (impactVel > CRASH_IMPACT_THRESHOLD && (currPlayer.invulnTimer <= 0)) {
+              // trigger crash: brief fade-out and schedule respawn
+              stateRef.current = 'dead';
+              crashFade = 0.6;
+              crashTimer = 0.9;
+              // play death sound
+              void sfxDeath?.play?.();
+            } else {
+              if (impactVel > FLASH_IMPACT_THRESHOLD) landingFlash = 0.12;
+              currPlayer.invulnTimer = 0.5;
+              // play landing sound
+              void sfxLand?.play?.();
+              // visual effects: dust and shake
+              try {
+                effects.onLand(currPlayer.x, currPlayer.y, currPlayer.vx);
+              } catch (e) {
+                /* ignore */
+              }
+            }
         }
       } else {
         // became airborne this frame?
@@ -433,18 +455,14 @@ export default function Game() {
 
       // death: fell too far below screen
       if (currPlayer.y > VIRTUAL_HEIGHT + 160 && stateRef.current !== 'dead' && !reachedFinish) {
+        // falling out -> crash/death
         stateRef.current = 'dead';
-        deathTimer = 0.7; // auto-respawn after short delay
+        crashFade = 0.6;
+        crashTimer = 0.9; // auto-respawn after crash
         void sfxDeath?.play?.();
       }
 
-      // handle death auto-respawn timer
-      if (stateRef.current === 'dead') {
-        deathTimer -= dt;
-        if (deathTimer <= 0) {
-          respawn();
-        }
-      }
+      
 
       // advance player sprite animation (if present)
       playerEntity?.update(dt);
@@ -647,6 +665,16 @@ export default function Game() {
         vctx.restore();
       }
 
+      // crash fade overlay (black fade on crash)
+      if (crashFade > 0) {
+        vctx.save();
+        const a = Math.min(1, crashFade / 0.6);
+        vctx.globalAlpha = a;
+        vctx.fillStyle = '#000';
+        vctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        vctx.restore();
+      }
+
       // debug overlay (top-left)
       vctx.fillStyle = 'rgba(0,0,0,0.6)';
       vctx.fillRect(6, 6, 200, 78);
@@ -771,16 +799,29 @@ export default function Game() {
       if (delta > 0) fps += (1 / delta - fps) * 0.08;
       // decay landing flash timer
       landingFlash = Math.max(0, landingFlash - delta);
+      // handle crash/death timers (fade only) even when not playing
+      if (stateRef.current === 'dead') {
+        if (crashTimer > 0) {
+          crashTimer -= delta;
+          crashFade = Math.max(0, crashFade - delta);
+        } else {
+          // no auto-respawn; wait for user to press `R` to respawn
+        }
+      }
       lastTime = now;
       accumulator += delta;
       // handle global input for state changes (pause, restart, start)
       const escPressed = input.get('Escape').wasPressed;
       const rPressed = input.get('r').wasPressed;
       const startPressed = input.get(' ').wasPressed;
+      const crashKey = input.get('k').wasPressed;
       if (rPressed) {
         // force respawn / restart
         respawn();
       }
+
+      // dev test: press K to simulate a crash
+      if (crashKey) triggerCrash();
 
       // toggle pause/resume
       if (escPressed) {
