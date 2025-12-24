@@ -2,10 +2,6 @@ import React, { useRef, useEffect } from 'react';
 import InputManager from './input';
 import { createPlayer, Player, PHYS, PLAYER_DEFAULTS } from './player';
 import { LEVELS } from './levels';
-
-// runtime mutable level loaded from the LEVELS pack
-let currentLevelIndex = 0;
-let currentLevel = JSON.parse(JSON.stringify(LEVELS[currentLevelIndex].level));
 import assetManager from './assetManager';
 import audioManager from './audioManager';
 import { createSpriteSheet, AnimatedSprite, AnimationStateMachine } from './sprite';
@@ -14,6 +10,10 @@ import EffectsManager from './effects';
 import { getHeightAtX, getSlopeAtX } from './heightmap';
 import { validateLevel } from './level';
 import { startEditor } from './editor';
+
+// runtime mutable level loaded from the LEVELS pack
+let currentLevelIndex = 0;
+let currentLevel = JSON.parse(JSON.stringify(LEVELS[currentLevelIndex].level));
 
 const VIRTUAL_WIDTH = 400;
 const VIRTUAL_HEIGHT = 225;
@@ -170,6 +170,66 @@ export default function Game() {
     vcanvas.width = VIRTUAL_WIDTH;
     vcanvas.height = VIRTUAL_HEIGHT;
     const vctx = vcanvas.getContext('2d')!;
+    // subtle repeating snow speckle + noise patterns used to add texture to fills
+    let snowPattern: CanvasPattern | null = null;
+    let noisePattern: CanvasPattern | null = null;
+    try {
+      // snow speckle (bigger sparse bright flakes)
+      const pcan = document.createElement('canvas');
+      pcan.width = 64;
+      pcan.height = 64;
+      const pc = pcan.getContext('2d')!;
+      pc.clearRect(0, 0, pcan.width, pcan.height);
+      for (let i = 0; i < 90; i++) {
+        const alpha = 0.08 + Math.random() * 0.26;
+        pc.fillStyle = `rgba(255,255,255,${alpha})`;
+        const r = Math.random() * 2.6 + 0.4;
+        pc.beginPath();
+        pc.arc(Math.random() * pcan.width, Math.random() * pcan.height, r, 0, Math.PI * 2);
+        pc.fill();
+      }
+      // add more and larger clumps for a chunkier, rougher snow look
+      for (let i = 0; i < 20; i++) {
+        const alpha = 0.12 + Math.random() * 0.3;
+        pc.fillStyle = `rgba(${220 + Math.floor(Math.random() * 35)},${220 + Math.floor(Math.random() * 35)},255,${alpha})`;
+        const rx = Math.random() * pcan.width;
+        const ry = Math.random() * pcan.height;
+        const rw = 3 + Math.random() * 6;
+        pc.beginPath();
+        pc.ellipse(rx, ry, rw * (0.6 + Math.random() * 1.6), rw * (0.5 + Math.random() * 1.4), Math.random() * Math.PI, 0, Math.PI * 2);
+        pc.fill();
+      }
+      snowPattern = vctx.createPattern(pcan, 'repeat');
+
+      // fine grain noise (for nighttime filmic noise)
+      const ncan = document.createElement('canvas');
+      ncan.width = 32;
+      ncan.height = 32;
+      const nc = ncan.getContext('2d')!;
+      nc.clearRect(0, 0, ncan.width, ncan.height);
+      for (let y = 0; y < ncan.height; y++) {
+        for (let x = 0; x < ncan.width; x++) {
+          const v = 120 + Math.floor(Math.random() * 120); // darker, higher-contrast noise
+          const a = 0.03 + Math.random() * 0.08;
+          nc.fillStyle = `rgba(${v},${v},${v},${a})`;
+          nc.fillRect(x, y, 1, 1);
+        }
+      }
+      // slightly blur/soften the noise by drawing a few translucent circles
+      for (let i = 0; i < 12; i++) {
+        nc.fillStyle = `rgba(180,200,220,${0.02 + Math.random() * 0.04})`;
+        const rx = Math.random() * ncan.width;
+        const ry = Math.random() * ncan.height;
+        const rr = 1 + Math.random() * 2;
+        nc.beginPath();
+        nc.arc(rx, ry, rr, 0, Math.PI * 2);
+        nc.fill();
+      }
+      noisePattern = vctx.createPattern(ncan, 'repeat');
+    } catch (e) {
+      snowPattern = null;
+      noisePattern = null;
+    }
 
     // player + camera state
     const currPlayer: Player = createPlayer();
@@ -718,16 +778,18 @@ export default function Game() {
 
       // draw terrain (filled polygon) only in visible range
       // Draw each continuous ground chunk separately so gaps (null heights) remain empty.
-      // top-to-bottom ground gradient (white -> desaturated navy)
-      let groundFill: CanvasPattern | CanvasGradient | string = '#2a6f3a';
+      // top-to-bottom ground gradient tuned for snowy/icy look
+      let groundFill: CanvasPattern | CanvasGradient | string = '#e6f7ff';
       try {
         const groundGrad = vctx.createLinearGradient(0, 0, 0, VIRTUAL_HEIGHT);
-        groundGrad.addColorStop(0, '#ffffff');
-        groundGrad.addColorStop(1, '#2f4056');
+        // moonlit snow (bright cool at top) -> darker bluish shadow at base
+        groundGrad.addColorStop(0, '#fbfdff'); // bright moonlit snow
+        groundGrad.addColorStop(0.55, '#bcd7f0'); // cool mid tone
+        groundGrad.addColorStop(1, '#081826'); // deep night-blue base
         groundFill = groundGrad;
         vctx.fillStyle = groundFill;
       } catch (e) {
-        groundFill = '#2a6f3a';
+        groundFill = '#e6f7ff';
         vctx.fillStyle = groundFill as string;
       }
       const DEBUG_GAP_MARKERS = true; // temporary visual aid: draw marker at top when sampler returns null
@@ -753,6 +815,30 @@ export default function Game() {
             vctx.lineTo(xStart, VIRTUAL_HEIGHT);
             vctx.closePath();
             vctx.fill();
+            if (snowPattern) {
+              vctx.save();
+              try {
+                // anchor pattern to world so it scrolls with camera
+                (snowPattern as any).setTransform?.(new DOMMatrix().translate(-camOffsetX, 0));
+              } catch (e) {
+                // ignore if setTransform unsupported
+              }
+              vctx.globalAlpha = 0.12;
+              vctx.fillStyle = snowPattern as any;
+              vctx.fill();
+              vctx.restore();
+            }
+            // second pass with scaled pattern to add coarser variation
+            try {
+              vctx.save();
+              try {
+                (snowPattern as any).setTransform?.(new DOMMatrix().scale(1.6).translate(-camOffsetX * 1.3, 0));
+              } catch (e) { }
+              vctx.globalAlpha = 0.04;
+              vctx.fillStyle = snowPattern as any;
+              vctx.fill();
+              vctx.restore();
+            } catch (e) { }
             // draw a clipped procedural ice strip along the top edge of this chunk
             try {
               // compute top Y (smallest y) across the chunk in screen/virtual coords
@@ -790,11 +876,11 @@ export default function Game() {
                 vctx.save();
                 vctx.clip();
 
-                // vertical gradient for icy look
+                // vertical gradient for icy look (night-toned)
                 const g = vctx.createLinearGradient(0, topY - iceH, 0, topY + 4);
-                g.addColorStop(0, '#e6fbff');
-                g.addColorStop(0.5, '#cfeeff');
-                g.addColorStop(1, 'rgba(200,240,255,0)');
+                g.addColorStop(0, '#eaf9ff');
+                g.addColorStop(0.5, '#9fcff6');
+                g.addColorStop(1, 'rgba(140,200,255,0)');
                 vctx.fillStyle = g;
 
                 // draw a smoothed ice band following the top surface with variable thickness
@@ -820,9 +906,9 @@ export default function Game() {
                       maxY = Math.max(maxY, p.sy);
                     }
                     const g2 = vctx.createLinearGradient(0, minY, 0, maxY + 4);
-                    g2.addColorStop(0, '#e6fbff');
-                    g2.addColorStop(0.5, '#cfeeff');
-                    g2.addColorStop(1, 'rgba(200,240,255,0)');
+                    g2.addColorStop(0, '#eaf9ff');
+                    g2.addColorStop(0.5, '#9fcff6');
+                    g2.addColorStop(1, 'rgba(140,200,255,0)');
                     vctx.fillStyle = g2;
 
                     vctx.beginPath();
@@ -922,6 +1008,18 @@ export default function Game() {
         vctx.lineTo(xStart, VIRTUAL_HEIGHT);
         vctx.closePath();
         vctx.fill();
+        if (snowPattern) {
+          vctx.save();
+          try {
+            (snowPattern as any).setTransform?.(new DOMMatrix().translate(-camOffsetX, 0));
+          } catch (e) {
+            // ignore
+          }
+          vctx.globalAlpha = 0.06;
+          vctx.fillStyle = snowPattern as any;
+          vctx.fill();
+          vctx.restore();
+        }
         // draw procedural ice strip for final chunk (same logic as above)
         try {
           let topY: number | null = null;
@@ -958,9 +1056,9 @@ export default function Game() {
             vctx.clip();
 
             const g = vctx.createLinearGradient(0, topY - iceH, 0, topY + 4);
-            g.addColorStop(0, '#e6fbff');
-            g.addColorStop(0.5, '#cfeeff');
-            g.addColorStop(1, 'rgba(200,240,255,0)');
+            g.addColorStop(0, '#eaf9ff');
+            g.addColorStop(0.5, '#9fcff6');
+            g.addColorStop(1, 'rgba(140,200,255,0)');
             vctx.fillStyle = g;
 
             // draw a smoothed ice band for the final chunk (variable thickness)
@@ -985,9 +1083,9 @@ export default function Game() {
                   maxY = Math.max(maxY, p.sy);
                 }
                 const g2 = vctx.createLinearGradient(0, minY, 0, maxY + 4);
-                g2.addColorStop(0, '#e6fbff');
-                g2.addColorStop(0.5, '#cfeeff');
-                g2.addColorStop(1, 'rgba(200,240,255,0)');
+                g2.addColorStop(0, '#eaf9ff');
+                g2.addColorStop(0.5, '#9fcff6');
+                g2.addColorStop(1, 'rgba(140,200,255,0)');
                 vctx.fillStyle = g2;
 
                 vctx.beginPath();
@@ -1037,21 +1135,21 @@ export default function Game() {
             const syp = isEditor ? wyToS(hy_i) : hy_i;
             pts2.push({ x: Math.round(sxp), y: syp });
           }
-              if (pts2.length >= 2) {
-                vctx.beginPath();
-                vctx.lineWidth = 2;
-                vctx.strokeStyle = 'rgba(0,60,90,0.35)';
-                vctx.moveTo(pts2[0].x, pts2[0].y);
-                for (let i = 1; i < pts2.length; i++) vctx.lineTo(pts2[i].x, pts2[i].y);
-                vctx.stroke();
+          if (pts2.length >= 2) {
+            vctx.beginPath();
+            vctx.lineWidth = 2;
+            vctx.strokeStyle = 'rgba(0,60,90,0.35)';
+            vctx.moveTo(pts2[0].x, pts2[0].y);
+            for (let i = 1; i < pts2.length; i++) vctx.lineTo(pts2[i].x, pts2[i].y);
+            vctx.stroke();
 
-                vctx.beginPath();
-                vctx.lineWidth = 1;
-                vctx.strokeStyle = 'rgba(170,220,255,0.95)';
-                vctx.moveTo(pts2[0].x, pts2[0].y - 0.5);
-                for (let i = 1; i < pts2.length; i++) vctx.lineTo(pts2[i].x, pts2[i].y - 0.5);
-                vctx.stroke();
-              }
+            vctx.beginPath();
+            vctx.lineWidth = 1;
+            vctx.strokeStyle = 'rgba(170,220,255,0.95)';
+            vctx.moveTo(pts2[0].x, pts2[0].y - 0.5);
+            for (let i = 1; i < pts2.length; i++) vctx.lineTo(pts2[i].x, pts2[i].y - 0.5);
+            vctx.stroke();
+          }
         } catch (e) {
           /* ignore */
         }
@@ -1141,6 +1239,38 @@ export default function Game() {
           effects.draw(vctx, camOffsetX, shakeY || 0);
         } catch (e) {
           /* ignore */
+        }
+        // subtle film/grain noise over the whole scene for nighttime atmosphere
+        try {
+          if (snowPattern) {
+            vctx.save();
+            try {
+              (snowPattern as any).setTransform?.(new DOMMatrix().translate(-camOffsetX, 0));
+            } catch (e) {
+              // ignore if setTransform unsupported
+            }
+            vctx.globalAlpha = 0.12;
+            vctx.fillStyle = snowPattern as any;
+            vctx.fill();
+            vctx.restore();
+            // second pass with scaled pattern to add coarser variation
+            try {
+              vctx.save();
+              try {
+                (snowPattern as any).setTransform?.(new DOMMatrix().scale(1.6).translate(-camOffsetX * 1.3, 0));
+              } catch (e) {
+                /* ignore */
+              }
+              vctx.globalAlpha = 0.04;
+              vctx.fillStyle = snowPattern as any;
+              vctx.fill();
+              vctx.restore();
+            } catch (e) {
+              /* ignore second pass errors */
+            }
+          }
+        } catch (e) {
+          /* ignore noise overlay errors */
         }
       }
 
