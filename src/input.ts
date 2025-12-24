@@ -30,22 +30,35 @@ export class InputManager {
   }
 
   private onKeyDown(e: KeyboardEvent) {
-    const k = (e.key as KeyName) || e.code;
-    // prevent default for arrows and space
-    if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' || k === ' ') {
-      e.preventDefault();
-    }
-    const state = this.keys.get(k as KeyName);
+    // normalize key values: handle Space/Spacebar, uppercase letters, and fall back to e.code
+    let kRaw = e.key;
+    if (!kRaw || kRaw === 'Unidentified') kRaw = e.code;
+    let norm: string = kRaw;
+    // map common variants of the space key to a single space char
+    if (kRaw === ' ' || kRaw === 'Space' || kRaw === 'Spacebar' || e.code === 'Space') norm = ' ';
+    // normalize single-letter keys to lowercase so 'W' and 'w' match our map
+    if (norm.length === 1) norm = norm.toLowerCase();
+    const state = this.keys.get(norm as KeyName);
     if (!state) return;
     if (!state.isDown) {
       state.isDown = true;
       state.wasPressed = true;
+      // log space presses for debugging jump input reliability
+      if (norm === ' ') {
+        // include raw key/code and timestamp to aid diagnosis
+        // eslint-disable-next-line no-console
+        console.log('[input] space pressed', { key: kRaw, code: e.code, t: performance.now() });
+      }
     }
   }
 
   private onKeyUp(e: KeyboardEvent) {
-    const k = (e.key as KeyName) || e.code;
-    const state = this.keys.get(k as KeyName);
+    let kRaw = e.key;
+    if (!kRaw || kRaw === 'Unidentified') kRaw = e.code;
+    let norm: string = kRaw;
+    if (kRaw === ' ' || kRaw === 'Space' || kRaw === 'Spacebar' || e.code === 'Space') norm = ' ';
+    if (norm.length === 1) norm = norm.toLowerCase();
+    const state = this.keys.get(norm as KeyName);
     if (!state) return;
     if (state.isDown) {
       state.isDown = false;

@@ -211,6 +211,15 @@ export default function Game() {
     // transient UI hint shown briefly after starting a new level
     let restartHintTimer = 0;
     let fps = 60;
+    // debugging: track space-press snapshot and whether a jump was applied this frame
+    let spacePressSnapshot: any = null;
+    let jumpAppliedThisFrame = false;
+    // persistent last-contact samples so main loop can inspect them
+    let lastContactBack: number | null = null;
+    let lastContactFront: number | null = null;
+    let lastContactAvg: number | null = null;
+    let lastNearGround: boolean = false;
+    let pendingImmediateJump = false;
     // editor state tracking
     let lastNonEditorState: GameState = stateRef.current;
     let editorStop: any = null;
@@ -318,8 +327,19 @@ export default function Game() {
       const NEAR_GROUND_THRESHOLD = 6; // pixels
       const nearGround = avgY !== null && currPlayer.y >= (avgY - NEAR_GROUND_THRESHOLD);
 
+      // update persistent last-contact diagnostics so main loop can report them
+      lastContactBack = hb;
+      lastContactFront = hf;
+      lastContactAvg = avgY;
+      lastNearGround = !!nearGround;
+
       if (contactExists && (currPlayer.wasGrounded || nearGround) && jumpLock <= 0) {
         // grounded: snap to contact average, reset vertical velocity and set angle
+        // log grounding transition when we become grounded this step
+        if (!currPlayer.grounded) {
+          // eslint-disable-next-line no-console
+          console.log('[jump-debug] grounded set TRUE', { t: performance.now(), hb, hf, avgY, nearGround, wasGrounded: currPlayer.wasGrounded, jumpLock, y: currPlayer.y });
+        }
         currPlayer.y = avgY!;
         currPlayer.vy = 0;
         currPlayer.grounded = true;
@@ -405,6 +425,26 @@ export default function Game() {
         // jump from grounded: immediate if pressed
         const jumpPressedGround = input.get(' ').wasPressed || input.get('ArrowUp').wasPressed || input.get('w').wasPressed;
         if (jumpPressedGround) {
+          // log press snapshot to help diagnose missed jumps
+          // eslint-disable-next-line no-console
+          console.log('[jump-debug] space press (grounded check)', {
+            t: performance.now(),
+            state: stateRef.current,
+            grounded: currPlayer.grounded,
+            wasGrounded: currPlayer.wasGrounded,
+            coyoteTimer,
+            jumpBuffer,
+            jumpLock,
+            jumpHold,
+            vy: currPlayer.vy,
+            y: currPlayer.y,
+            lastGroundY,
+            nearGround,
+            hb,
+            hf,
+            ledgeGrace,
+          });
+
           currPlayer.vy = -PHYS.JUMP_IMPULSE;
           currPlayer.grounded = false;
           jumpHold = PHYS.JUMP_HOLD_TIME;
@@ -418,6 +458,42 @@ export default function Game() {
             lastGroundY = null;
             ledgeGrace = 0;
           } catch (e) { }
+          // mark jump applied and log
+          jumpAppliedThisFrame = true;
+          // consume any stored press so it doesn't retrigger on landing
+          spacePressSnapshot = null;
+          pendingImmediateJump = false;
+          // eslint-disable-next-line no-console
+          console.log('[jump-debug] jump applied (grounded)', { t: performance.now(), vy: currPlayer.vy, y: currPlayer.y });
+        }
+
+        // Missed-press fallback: if we captured a space press earlier (or main loop
+        // requested an immediate jump) but the physics step didn't see it, force a
+        // jump now when the player is effectively grounded.
+        if ((spacePressSnapshot || pendingImmediateJump) && !jumpAppliedThisFrame && jumpLock <= 0) {
+          const withinProximity = nearGround || (typeof avgY === 'number' && Math.abs(currPlayer.y - avgY) <= NEAR_GROUND_THRESHOLD);
+          if (contactExists && withinProximity) {
+            // apply same jump as normal grounded case
+            currPlayer.vy = -PHYS.JUMP_IMPULSE;
+            currPlayer.grounded = false;
+            jumpHold = PHYS.JUMP_HOLD_TIME;
+            jumpLock = 0.18;
+            void sfxJump?.play?.();
+            try {
+              currPlayer.y += currPlayer.vy * dt;
+              lastGroundY = null;
+              ledgeGrace = 0;
+            } catch (e) { }
+            jumpAppliedThisFrame = true;
+            // consume any stored press so it doesn't retrigger on landing
+            spacePressSnapshot = null;
+            pendingImmediateJump = false;
+            // eslint-disable-next-line no-console
+            console.log('[jump-debug] forced jump (missed-press fallback)', { press: spacePressSnapshot, pendingImmediateJump, t: performance.now(), vy: currPlayer.vy, y: currPlayer.y });
+            // consume snapshot and pending flag so we don't re-fire
+            spacePressSnapshot = null;
+            pendingImmediateJump = false;
+          }
         }
 
         // advance horizontal position while grounded
@@ -456,8 +532,16 @@ export default function Game() {
           }
         }
       } else {
+        // contact exists but we didn't treat as grounded (maybe jumpLock or not near enough)
+        if (contactExists && !(currPlayer.wasGrounded || nearGround) || (contactExists && jumpLock > 0)) {
+          // eslint-disable-next-line no-console
+          console.log('[jump-debug] contact exists but not grounded', { t: performance.now(), hb, hf, avgY, nearGround, wasGrounded: currPlayer.wasGrounded, jumpLock, y: currPlayer.y });
+        }
         // became airborne this frame?
         if (currPlayer.wasGrounded && !currPlayer.grounded) {
+          // log airborne transition
+          // eslint-disable-next-line no-console
+          console.log('[jump-debug] became airborne', { t: performance.now(), y: currPlayer.y, vy: currPlayer.vy });
           // preserve last grounded pose for a short grace period
           if (lastGroundY === null) {
             lastGroundY = prevPlayer.y;
@@ -480,7 +564,11 @@ export default function Game() {
         } else {
           // handle jump input buffering: if player pressed jump recently, store it
           const jumpPressed = input.get(' ').wasPressed || input.get('ArrowUp').wasPressed || input.get('w').wasPressed;
-          if (jumpPressed) jumpBuffer = JUMP.BUFFER_TIME;
+          if (jumpPressed) {
+            jumpBuffer = JUMP.BUFFER_TIME;
+            // eslint-disable-next-line no-console
+            console.log('[jump-debug] space press (airborne/buffer)', { t: performance.now(), coyoteTimer, jumpBuffer, jumpLock, grounded: currPlayer.grounded, wasGrounded: currPlayer.wasGrounded, vy: currPlayer.vy, y: currPlayer.y });
+          }
 
           // attempt to jump if we still have coyote time
           if (jumpBuffer > 0 && coyoteTimer > 0) {
@@ -491,6 +579,10 @@ export default function Game() {
             coyoteTimer = 0;
             // jump sfx
             void sfxJump?.play?.();
+            // mark jump applied and log
+            jumpAppliedThisFrame = true;
+            // eslint-disable-next-line no-console
+            console.log('[jump-debug] jump applied (coyote)', { t: performance.now(), vy: currPlayer.vy, y: currPlayer.y });
           }
 
           // apply airborne physics with variable gravity while holding jump
@@ -1030,6 +1122,32 @@ export default function Game() {
       const startPressed = input.get(' ').wasPressed;
       const crashKey = input.get('k').wasPressed;
       const ePressed = input.get('e').wasPressed;
+      if (startPressed) {
+        // Only capture a snapshot for missed-press handling when the player is
+        // currently grounded. We shouldn't record a 'missed' press while
+        // airborne because that would later trigger forced jumps incorrectly.
+        if (currPlayer.grounded) {
+          spacePressSnapshot = {
+            t: performance.now(),
+            state: stateRef.current,
+            grounded: currPlayer.grounded,
+            wasGrounded: currPlayer.wasGrounded,
+            coyoteTimer,
+            jumpBuffer,
+            jumpLock,
+            vy: currPlayer.vy,
+            y: currPlayer.y,
+          };
+          // If we appear grounded now and contact samples from the last simulate show
+          // we're near the ground, request an immediate jump to be applied inside
+          // the next physics step to avoid missing the transient wasPressed edge.
+          if (stateRef.current === 'playing' && spacePressSnapshot.grounded && jumpLock <= 0 && lastContactBack !== null && lastContactFront !== null && lastNearGround) {
+            pendingImmediateJump = true;
+            // eslint-disable-next-line no-console
+            console.log('[jump-debug] requested pendingImmediateJump from main loop', { t: performance.now(), press: spacePressSnapshot });
+          }
+        }
+      }
       if (rPressed) {
         // force respawn / restart
         respawn();
@@ -1358,6 +1476,8 @@ export default function Game() {
           // advance snapshots
           prevPlayer = { ...currPlayer };
           prevCam = { ...currCam };
+          // reset jump-applied marker for this fixed-step batch
+          jumpAppliedThisFrame = false;
           // You can query input here per-step if needed, e.g. input.get(' ')
           simulate(FIXED_DT);
           accumulator -= FIXED_DT;
@@ -1379,8 +1499,35 @@ export default function Game() {
         // keyboard zoom handled via keydown listener attached when editor starts
       }
 
+      // if space was pressed this frame but no jump was applied during simulation, log detailed snapshot
+      if (spacePressSnapshot && !jumpAppliedThisFrame) {
+        // eslint-disable-next-line no-console
+        console.log('[jump-debug] SPACE pressed but no jump applied', {
+          press: spacePressSnapshot,
+          now: performance.now(),
+          grounded: currPlayer.grounded,
+          wasGrounded: currPlayer.wasGrounded,
+          lastGroundY,
+          ledgeGrace,
+          jumpLock,
+          coyoteTimer,
+          jumpBuffer,
+          vy: currPlayer.vy,
+          y: currPlayer.y,
+          // additional diagnostics: contact samples and whether input still reports wasPressed
+          contactBack: lastContactBack,
+          contactFront: lastContactFront,
+          contactAvg: lastContactAvg,
+          contactExists: lastContactBack !== null && lastContactFront !== null,
+          nearGround: lastNearGround,
+          inputWasPressedNow: input.get(' ').wasPressed,
+        });
+      }
       // clear per-frame transient input flags
       input.clearTransient();
+      // reset snapshot and applied flag after handling
+      spacePressSnapshot = null;
+      jumpAppliedThisFrame = false;
       rafId = requestAnimationFrame(loop);
     }
 
