@@ -5,34 +5,9 @@
     "author": "auto",
     "width": 800,
     "parallax": [
-      {
-        "src": "parallax/sky.svg",
-        "factor": 0.05,
-        "y": 0,
-        "tile": true,
-        "alpha": 1
-      },
-      {
-        "src": "parallax/mountains.svg",
-        "factor": 0.18,
-        "y": 18,
-        "tile": true,
-        "alpha": 1
-      },
-      {
-        "src": "parallax/mid.svg",
-        "factor": 0.35,
-        "y": 42,
-        "tile": true,
-        "alpha": 1
-      },
-      {
-        "src": "parallax/fg.svg",
-        "factor": 0.7,
-        "y": 80,
-        "tile": true,
-        "alpha": 1
-      }
+      { "src": "parallax/night-sky.png", "factor": 0.05, "y": 0, "tile": true, "alpha": 1 },
+      { "src": "parallax/mountains.png", "factor": 0.18, "y": -100, "tile": true, "alpha": 1 },
+      { "src": "parallax/hills.png", "factor": 0.7, "y": -150, "tile": true, "alpha": 1 }
     ]
   },
   "segments": [
