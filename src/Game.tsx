@@ -183,6 +183,13 @@ export default function Game() {
     // editor state tracking
     let lastNonEditorState: GameState = stateRef.current;
     let editorStop: any = null;
+    // editor camera (only active while in editor mode)
+    let editorCamX = 0;
+    let editorCamY = 0;
+    let editorZoom = 1;
+    const EDITOR_ZOOM_MIN = 0.5;
+    const EDITOR_ZOOM_MAX = 3.0;
+    let lastEditorZoom = 1;
     // parallax layers: images and scroll factors
     const parallax: ParallaxLayer[] = [];
     // visual effects (dust, speed lines, screen shake)
@@ -529,11 +536,24 @@ export default function Game() {
     function draw() {
       // interpolation alpha based on accumulator
       const alpha = Math.max(0, Math.min(1, accumulator / FIXED_DT));
+      const isEditor = stateRef.current === 'editor';
+      const zoom = isEditor ? editorZoom : 1;
 
       // interpolate player and camera
       const ix = prevPlayer.x * (1 - alpha) + currPlayer.x * alpha;
       const iy = prevPlayer.y * (1 - alpha) + currPlayer.y * alpha;
       const camx = prevCam.x * (1 - alpha) + currCam.x * alpha;
+
+      // Editor camera uses the same coordinate convention as screenToWorldFn:
+      // camX/camY represent the CENTER of the view in world units.
+      const camXUsed = isEditor ? editorCamX : camx;
+      const camYUsed = isEditor ? editorCamY : 0;
+      const viewWorldW = VIRTUAL_WIDTH / Math.max(0.0001, zoom);
+      const viewWorldH = VIRTUAL_HEIGHT / Math.max(0.0001, zoom);
+      const leftWorld = camXUsed - viewWorldW / 2;
+      const topWorld = camYUsed - viewWorldH / 2;
+      const wxToS = (wx: number) => (wx - leftWorld) * zoom;
+      const wyToS = (wy: number) => (wy - topWorld) * zoom;
 
 
       // draw scene into virtual canvas (virtual pixels)
@@ -541,8 +561,8 @@ export default function Game() {
       vctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
 
       // apply screen-shake offset to camera when rendering
-      const shakeX = (effects && effects.shake && effects.shake.x) || 0;
-      const shakeY = (effects && effects.shake && effects.shake.y) || 0;
+      const shakeX = (!isEditor && (effects && effects.shake && effects.shake.x)) ? effects.shake.x : 0;
+      const shakeY = (!isEditor && (effects && effects.shake && effects.shake.y)) ? effects.shake.y : 0;
       const camxShaken = camx + shakeX;
 
       // draw parallax background layers (back-to-front)
@@ -555,7 +575,8 @@ export default function Game() {
           const yOff = (layer.yOff || 0) + shakeY;
           // tile image horizontally to fill view
           const imgW = img.width || VIRTUAL_WIDTH;
-          const scroll = (camxShaken * factor) % imgW;
+          const parallaxCamX = isEditor ? editorCamX : camxShaken;
+          const scroll = (parallaxCamX * factor) % imgW;
           // draw enough tiles to cover screen
           for (let x = -imgW; x < VIRTUAL_WIDTH + imgW; x += imgW) {
             vctx.drawImage(img, Math.round(x - scroll), Math.round(yOff));
@@ -563,13 +584,12 @@ export default function Game() {
         }
       }
 
-      // compute camera offset (centered) including shake
+      // compute camera offset used by gameplay-only helpers (effects). World rendering in editor mode uses wxToS/wyToS.
       let camOffsetX = camxShaken - VIRTUAL_WIDTH / 2;
-      if (RENDER.PIXEL_SNAP) camOffsetX = Math.round(camOffsetX);
+      if (!isEditor && RENDER.PIXEL_SNAP) camOffsetX = Math.round(camOffsetX);
 
-      // compute visible segment range for culling
-      const leftWorld = camxShaken - VIRTUAL_WIDTH / 2;
-      const rightWorld = camxShaken + VIRTUAL_WIDTH / 2;
+      // compute visible segment range for culling (zoom-aware)
+      const rightWorld = camXUsed + viewWorldW / 2;
       const leftIdx = Math.max(0, Math.floor(leftWorld) - RENDER.PADDING);
       const rightIdx = Math.min((sampleLevel.segments && sampleLevel.segments.length - 1) || 0, Math.ceil(rightWorld) + RENDER.PADDING);
 
@@ -581,7 +601,7 @@ export default function Game() {
       let chunkFirstX = 0; // world x of first sample in chunk
       let chunkLastX = 0; // world x of last sample in chunk
       for (let xi = leftIdx; xi <= rightIdx; xi++) {
-        const sx = xi - camOffsetX;
+        const sx = isEditor ? wxToS(xi) : (xi - camOffsetX);
         const hy = getHeightAtX(sampleLevel as any, xi);
         if (hy === null) {
           if (DEBUG_GAP_MARKERS) {
@@ -593,19 +613,28 @@ export default function Game() {
           // gap: if we were drawing a chunk, close and fill it
           if (inChunk) {
             // finish polygon for this chunk
-            vctx.lineTo(chunkLastX - camOffsetX, VIRTUAL_HEIGHT);
-            vctx.lineTo(chunkFirstX - camOffsetX, VIRTUAL_HEIGHT);
+            const xEnd = isEditor ? wxToS(chunkLastX) : (chunkLastX - camOffsetX);
+            const xStart = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+            vctx.lineTo(xEnd, VIRTUAL_HEIGHT);
+            vctx.lineTo(xStart, VIRTUAL_HEIGHT);
             vctx.closePath();
             vctx.fill();
             // optionally stroke the top edge of the chunk
             vctx.beginPath();
             vctx.strokeStyle = 'rgba(0,0,0,0.25)';
             vctx.lineWidth = 1;
-            vctx.moveTo(chunkFirstX - camOffsetX, getHeightAtX(sampleLevel as any, chunkFirstX) as number);
+            {
+              const h0 = getHeightAtX(sampleLevel as any, chunkFirstX) as number;
+              const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+              const sy0 = isEditor ? wyToS(h0) : h0;
+              vctx.moveTo(sx0, sy0);
+            }
             for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
               const hy_i = getHeightAtX(sampleLevel as any, sx_i);
               if (hy_i === null) break;
-              vctx.lineTo(sx_i - camOffsetX, hy_i);
+              const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
+              const syp = isEditor ? wyToS(hy_i) : hy_i;
+              vctx.lineTo(sxp, syp);
             }
             vctx.stroke();
             vctx.beginPath();
@@ -619,30 +648,39 @@ export default function Game() {
           chunkFirstX = xi;
           chunkLastX = xi;
           vctx.beginPath();
-          vctx.moveTo(sx, hy);
+          vctx.moveTo(sx, isEditor ? wyToS(hy) : hy);
           inChunk = true;
         } else {
           // continue current chunk
-          vctx.lineTo(sx, hy);
+          vctx.lineTo(sx, isEditor ? wyToS(hy) : hy);
           chunkLastX = xi;
         }
       }
 
       if (inChunk) {
         // close and fill the final chunk
-        vctx.lineTo(chunkLastX - camOffsetX, VIRTUAL_HEIGHT);
-        vctx.lineTo(chunkFirstX - camOffsetX, VIRTUAL_HEIGHT);
+        const xEnd = isEditor ? wxToS(chunkLastX) : (chunkLastX - camOffsetX);
+        const xStart = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+        vctx.lineTo(xEnd, VIRTUAL_HEIGHT);
+        vctx.lineTo(xStart, VIRTUAL_HEIGHT);
         vctx.closePath();
         vctx.fill();
         // stroke top edge of final chunk
         vctx.beginPath();
         vctx.strokeStyle = 'rgba(0,0,0,0.25)';
         vctx.lineWidth = 1;
-        vctx.moveTo(chunkFirstX - camOffsetX, getHeightAtX(sampleLevel as any, chunkFirstX) as number);
+        {
+          const h0 = getHeightAtX(sampleLevel as any, chunkFirstX) as number;
+          const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+          const sy0 = isEditor ? wyToS(h0) : h0;
+          vctx.moveTo(sx0, sy0);
+        }
         for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
           const hy_i = getHeightAtX(sampleLevel as any, sx_i);
           if (hy_i === null) break;
-          vctx.lineTo(sx_i - camOffsetX, hy_i);
+          const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
+          const syp = isEditor ? wyToS(hy_i) : hy_i;
+          vctx.lineTo(sxp, syp);
         }
         vctx.stroke();
         vctx.beginPath();
@@ -651,8 +689,9 @@ export default function Game() {
       // draw level objects (start/checkpoint/finish) culling to visible range
       for (const obj of sampleLevel.objects || []) {
         if (obj.x < leftIdx - 1 || obj.x > rightIdx + 1) continue;
-        const hx = obj.x - camOffsetX;
-        const hy = getHeightAtX(sampleLevel as any, obj.x) ?? VIRTUAL_HEIGHT / 2;
+        const hx = isEditor ? wxToS(obj.x) : (obj.x - camOffsetX);
+        const hyWorld = getHeightAtX(sampleLevel as any, obj.x);
+        const hy = hyWorld !== null ? (isEditor ? wyToS(hyWorld) : hyWorld) : (VIRTUAL_HEIGHT / 2);
         if (obj.type === 'start') {
           vctx.fillStyle = '#ffd700';
           vctx.fillRect(Math.round(hx) - 4, Math.round(hy) - 12, 8, 8);
@@ -671,8 +710,8 @@ export default function Game() {
       }
 
       // player draw (sprite if available, otherwise simple placeholder)
-      const px = Math.round(ix - camOffsetX);
-      const py = Math.round(iy - (shakeY || 0));
+      const px = Math.round(isEditor ? wxToS(ix) : (ix - camOffsetX));
+      const py = Math.round((isEditor ? wyToS(iy) : iy) - (shakeY || 0));
       // cull off-screen player draws for performance
       if (px >= -64 && px <= VIRTUAL_WIDTH + 64) {
         if (playerEntity) {
@@ -725,10 +764,12 @@ export default function Game() {
       }
 
       // draw effects (particles) after main scene but before overlays
-      try {
-        effects.draw(vctx, camOffsetX, shakeY || 0);
-      } catch (e) {
-        /* ignore */
+      if (!isEditor) {
+        try {
+          effects.draw(vctx, camOffsetX, shakeY || 0);
+        } catch (e) {
+          /* ignore */
+        }
       }
 
       // landing flash overlay
@@ -841,7 +882,18 @@ export default function Game() {
       // call editor overlay renderer if present
       try {
         if (typeof editorStop !== 'undefined' && editorStop && (editorStop as any).renderOverlay) {
-          (editorStop as any).renderOverlay(vctx, camxShaken, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+          if (stateRef.current === 'editor') {
+            // Editor overlay expects a world window origin (left/top), not camera center.
+            // Provide the same view window the renderer is using so overlay sticks to ground under pan/zoom.
+            const viewW = VIRTUAL_WIDTH / Math.max(0.0001, editorZoom);
+            const viewH = VIRTUAL_HEIGHT / Math.max(0.0001, editorZoom);
+            const left = editorCamX - viewW / 2;
+            const top = editorCamY - viewH / 2;
+            (editorStop as any).renderOverlay(vctx, left, top, viewW, viewH);
+          } else {
+            // Gameplay camera origin (left/top) for consistency
+            (editorStop as any).renderOverlay(vctx, camOffsetX, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+          }
         }
       } catch (e) {
         // ignore overlay errors
@@ -965,31 +1017,140 @@ export default function Game() {
           if (typeof EDITOR_ENABLED !== 'undefined' && EDITOR_ENABLED) {
             if (stateRef.current === 'editor') {
               if (!editorStop) {
+                // initialize editor camera from gameplay cam/player
+                editorCamX = currCam.x;
+                editorCamY = currPlayer.y || VIRTUAL_HEIGHT / 2;
+                editorZoom = lastEditorZoom || 1;
                 canvasElInner.dataset.editorActive = '1';
+                // screenToWorld maps client pixels -> virtual coords -> world coords
+                const screenToWorldFn = (clientX: number, clientY: number) => {
+                  // convert client -> virtual canvas coords (px,py)
+                  const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
+                  const destW = VIRTUAL_WIDTH * scale;
+                  const destH = VIRTUAL_HEIGHT * scale;
+                  const destX = (window.innerWidth - destW) / 2;
+                  const destY = (window.innerHeight - destH) / 2;
+                  const px = (clientX - destX) / scale;
+                  const py = (clientY - destY) / scale;
+                  // when in editor mode, convert virtual px/py -> world using editor cam + zoom
+                  const wx = (px - VIRTUAL_WIDTH / 2) / editorZoom + editorCamX;
+                  const wy = (py - VIRTUAL_HEIGHT / 2) / editorZoom + editorCamY;
+                  return { x: wx, y: wy };
+                };
+
                 editorStop = startEditor({
                   canvas: canvasElInner,
-                  screenToWorld: (clientX: number, clientY: number) => {
-                    // map client coords -> virtual world coords
-                    const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
-                    const destW = VIRTUAL_WIDTH * scale;
-                    const destH = VIRTUAL_HEIGHT * scale;
-                    const destX = (window.innerWidth - destW) / 2;
-                    const destY = (window.innerHeight - destH) / 2;
-                    const px = (clientX - destX) / scale;
-                    const py = (clientY - destY) / scale;
-                    // world x relative to camera
-                    const camOffsetX = currCam.x - VIRTUAL_WIDTH / 2;
-                    return { x: px + camOffsetX, y: py };
-                  },
+                  screenToWorld: screenToWorldFn,
                   level: sampleLevel as any,
                   onChange() {
                     // noop for now; could mark level dirty
                   },
                 });
+
+                // wheel zoom handler (anchor zoom at cursor)
+                const wheelHandler = (ev: WheelEvent) => {
+                  if (stateRef.current !== 'editor') return;
+                  ev.preventDefault();
+                  // client -> virtual px/py
+                  const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
+                  const destW = VIRTUAL_WIDTH * scale;
+                  const destH = VIRTUAL_HEIGHT * scale;
+                  const destX = (window.innerWidth - destW) / 2;
+                  const destY = (window.innerHeight - destH) / 2;
+                  const px = (ev.clientX - destX) / scale;
+                  const py = (ev.clientY - destY) / scale;
+                  // world under cursor before zoom
+                  const worldBeforeX = (px - VIRTUAL_WIDTH / 2) / editorZoom + editorCamX;
+                  const worldBeforeY = (py - VIRTUAL_HEIGHT / 2) / editorZoom + editorCamY;
+                  // delta from wheel: use exponential scale
+                  const factor = Math.pow(1.1, -ev.deltaY / 100);
+                  let newZoom = editorZoom * factor;
+                  newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, newZoom));
+                  // adjust camera so worldUnderCursor stays stable
+                  editorCamX = worldBeforeX - (px - VIRTUAL_WIDTH / 2) / newZoom;
+                  editorCamY = worldBeforeY - (py - VIRTUAL_HEIGHT / 2) / newZoom;
+                  editorZoom = newZoom;
+                  lastEditorZoom = editorZoom;
+                };
+                window.addEventListener('wheel', wheelHandler, { passive: false });
+
+                // pointer pan handler (middle or right button drag)
+                let panPointerId: number | null = null;
+                let panLastPx = 0;
+                let panLastPy = 0;
+                const onPointerDownPan = (ev: PointerEvent) => {
+                  if (stateRef.current !== 'editor') return;
+                  if (ev.button !== 1 && ev.button !== 2) return; // middle or right
+                  try { (ev.target as Element).setPointerCapture(ev.pointerId); } catch (e) { }
+                  panPointerId = ev.pointerId;
+                  const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
+                  const destW = VIRTUAL_WIDTH * scale;
+                  const destH = VIRTUAL_HEIGHT * scale;
+                  const destX = (window.innerWidth - destW) / 2;
+                  const destY = (window.innerHeight - destH) / 2;
+                  panLastPx = (ev.clientX - destX) / scale;
+                  panLastPy = (ev.clientY - destY) / scale;
+                };
+                const onPointerMovePan = (ev: PointerEvent) => {
+                  if (stateRef.current !== 'editor') return;
+                  if (panPointerId !== ev.pointerId) return;
+                  const scale = Math.min(window.innerWidth / VIRTUAL_WIDTH, window.innerHeight / VIRTUAL_HEIGHT);
+                  const destW = VIRTUAL_WIDTH * scale;
+                  const destH = VIRTUAL_HEIGHT * scale;
+                  const destX = (window.innerWidth - destW) / 2;
+                  const destY = (window.innerHeight - destH) / 2;
+                  const px = (ev.clientX - destX) / scale;
+                  const py = (ev.clientY - destY) / scale;
+                  const dx = px - panLastPx;
+                  const dy = py - panLastPy;
+                  panLastPx = px;
+                  panLastPy = py;
+                  // move editor cam by delta / zoom
+                  editorCamX -= dx / editorZoom;
+                  editorCamY -= dy / editorZoom;
+                };
+                const onPointerUpPan = (ev: PointerEvent) => {
+                  if (panPointerId !== ev.pointerId) return;
+                  panPointerId = null;
+                  try { (ev.target as Element).releasePointerCapture(ev.pointerId); } catch (e) { }
+                };
+                canvasElInner.addEventListener('pointerdown', onPointerDownPan);
+                window.addEventListener('pointermove', onPointerMovePan);
+                window.addEventListener('pointerup', onPointerUpPan);
+
+                // keydown handler for keyboard zoom/reset
+                const keydownHandler = (ev: KeyboardEvent) => {
+                  if (stateRef.current !== 'editor') return;
+                  if (ev.key === '=' || ev.key === '+') {
+                    let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, editorZoom * 1.1));
+                    editorZoom = newZoom; lastEditorZoom = editorZoom;
+                  } else if (ev.key === '-') {
+                    let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, editorZoom / 1.1));
+                    editorZoom = newZoom; lastEditorZoom = editorZoom;
+                  } else if (ev.key === 'z') {
+                    editorZoom = 1; lastEditorZoom = 1; editorCamX = currPlayer.x; editorCamY = currPlayer.y || VIRTUAL_HEIGHT / 2;
+                  }
+                };
+                window.addEventListener('keydown', keydownHandler);
+
+                // store these handlers on editorStop so we can remove them when stopping
+                (editorStop as any).__editorHandlers = { wheelHandler, onPointerDownPan, onPointerMovePan, onPointerUpPan, keydownHandler };
               }
             } else {
               if (editorStop) {
                 try { if (canvasRef.current) canvasRef.current.dataset.editorActive = '0'; } catch (e) { }
+                // remove editor-specific handlers
+                try {
+                  const h = (editorStop as any).__editorHandlers;
+                  if (h) {
+                    window.removeEventListener('wheel', h.wheelHandler);
+                    const canvasElInner2 = canvasRef.current!;
+                    canvasElInner2.removeEventListener('pointerdown', h.onPointerDownPan);
+                    window.removeEventListener('pointermove', h.onPointerMovePan);
+                    window.removeEventListener('pointerup', h.onPointerUpPan);
+                    if (h.keydownHandler) window.removeEventListener('keydown', h.keydownHandler);
+                  }
+                } catch (e) { }
                 try { editorStop(); } catch (e) { }
                 editorStop = null;
               }
@@ -1015,6 +1176,17 @@ export default function Game() {
       }
 
       draw();
+      // editor keyboard pan/zoom handling
+      if (stateRef.current === 'editor') {
+        const basePanSpeed = 180; // world units per second
+        const panSpeed = basePanSpeed * Math.min(0.033, delta) / Math.max(0.0001, editorZoom);
+        if (input.get('w').isDown || input.get('ArrowUp').isDown) editorCamY -= panSpeed;
+        if (input.get('s').isDown || input.get('ArrowDown').isDown) editorCamY += panSpeed;
+        if (input.get('a').isDown || input.get('ArrowLeft').isDown) editorCamX -= panSpeed;
+        if (input.get('d').isDown || input.get('ArrowRight').isDown) editorCamX += panSpeed;
+        // keyboard zoom handled via keydown listener attached when editor starts
+      }
+
       // clear per-frame transient input flags
       input.clearTransient();
       rafId = requestAnimationFrame(loop);

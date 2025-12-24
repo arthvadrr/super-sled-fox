@@ -289,22 +289,37 @@ export function startEditor(opts: StartOpts) {
     window.removeEventListener('keydown', onKeyDown as any);
   }
 
-  (stop as any).renderOverlay = function (vctx: CanvasRenderingContext2D, camX: number, viewW: number, viewH: number) {
+  (stop as any).renderOverlay = function (vctx: CanvasRenderingContext2D, leftWorld: number, topWorld: number, viewW: number, viewH: number) {
     vctx.save();
-    const offsetX = Math.round(viewW / 2 - camX);
-    vctx.translate(offsetX, 0);
 
-    const startX = Math.max(0, Math.floor((camX - viewW / 2) / segmentLen) - 1);
-    const endX = Math.min(level.segments.length - 1, Math.ceil((camX + viewW / 2) / segmentLen) + 1);
+    // Map world-space view window (viewW/viewH) into the fixed virtual canvas pixel space.
+    // Game.tsx renders the world with this same mapping when zoomed.
+    const canvasW = vctx.canvas.width;
+    const canvasH = vctx.canvas.height;
+    const scaleX = canvasW / Math.max(0.0001, viewW);
+    const scaleY = canvasH / Math.max(0.0001, viewH);
+    const onePx = 1 / Math.max(0.0001, scaleX);
+    const halfPx = 0.5 * onePx;
 
-    vctx.lineWidth = 1;
+    // screen = (world - leftWorld/topWorld) * scale
+    // IMPORTANT: scale first, then translate by world units.
+    vctx.scale(scaleX, scaleY);
+    vctx.translate(-leftWorld, -topWorld);
+
+    const rightWorld = leftWorld + viewW;
+    const bottomWorld = topWorld + viewH;
+
+    const startX = Math.max(0, Math.floor(leftWorld / segmentLen) - 1);
+    const endX = Math.min(level.segments.length - 1, Math.ceil(rightWorld / segmentLen) + 1);
+
+    vctx.lineWidth = onePx;
     // grid lines
     for (let i = startX; i <= endX; i++) {
       const sx = i * segmentLen;
       vctx.strokeStyle = i % 10 === 0 ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)';
       vctx.beginPath();
-      vctx.moveTo(sx + 0.5, 0);
-      vctx.lineTo(sx + 0.5, viewH);
+      vctx.moveTo(sx + halfPx, topWorld);
+      vctx.lineTo(sx + halfPx, bottomWorld);
       vctx.stroke();
     }
 
@@ -313,7 +328,7 @@ export function startEditor(opts: StartOpts) {
       if (level.segments[i] === null) {
         const sx = i * segmentLen;
         vctx.fillStyle = 'rgba(255,0,0,0.08)';
-        vctx.fillRect(sx, 0, segmentLen, viewH);
+        vctx.fillRect(sx, topWorld, segmentLen, viewH);
       }
     }
 
@@ -321,7 +336,7 @@ export function startEditor(opts: StartOpts) {
     if (hoveredIndex !== null) {
       const hx = hoveredIndex * segmentLen;
       vctx.fillStyle = currentTool === Tool.ToggleGap ? 'rgba(255,165,0,0.12)' : 'rgba(255,255,0,0.08)';
-      vctx.fillRect(hx, 0, segmentLen, viewH);
+      vctx.fillRect(hx, topWorld, segmentLen, viewH);
     }
 
     vctx.fillStyle = 'rgba(255,255,255,0.95)';
@@ -332,12 +347,12 @@ export function startEditor(opts: StartOpts) {
       const sx = i * segmentLen + segmentLen / 2;
       if (v === null) {
         vctx.fillStyle = 'rgba(255,0,0,0.9)';
-        vctx.fillRect(sx - 2, viewH - 6, 4, 4);
+        vctx.fillRect(sx - 2 * onePx, bottomWorld - 6 * onePx, 4 * onePx, 4 * onePx);
         vctx.fillStyle = 'rgba(255,255,255,0.95)';
       } else {
         const hy = v as number;
         vctx.beginPath();
-        vctx.arc(sx, hy, 2.0, 0, Math.PI * 2);
+        vctx.arc(sx, hy, 2 * onePx, 0, Math.PI * 2);
         vctx.fill();
         vctx.stroke();
       }
@@ -359,44 +374,46 @@ export function startEditor(opts: StartOpts) {
         vctx.strokeStyle = '#ffd700';
         vctx.fillStyle = '#ffd700';
       }
-      vctx.lineWidth = selectedObjectIndex === i ? 2 : 1;
+      vctx.lineWidth = (selectedObjectIndex === i ? 2 : 1) * onePx;
       vctx.beginPath();
-      vctx.moveTo(ox + 0.5, 4);
-      vctx.lineTo(ox + 0.5, viewH - 4);
+      vctx.moveTo(ox + halfPx, topWorld + 4);
+      vctx.lineTo(ox + halfPx, bottomWorld - 4);
       vctx.stroke();
       // label
       vctx.font = '10px monospace';
       vctx.textAlign = 'center';
-      vctx.fillText(obj.type === 'start' ? 'S' : obj.type === 'finish' ? 'F' : 'C', ox + 0.5, 14);
+      vctx.fillText(obj.type === 'start' ? 'S' : obj.type === 'finish' ? 'F' : 'C', ox + halfPx, topWorld + 14);
       if (selectedObjectIndex === i) {
         vctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        vctx.strokeRect(ox - 6, 16, 12, 12);
+        vctx.strokeRect(ox - 6 * onePx, topWorld + 16, 12 * onePx, 12 * onePx);
       }
     }
 
     // HUD
     vctx.save();
     vctx.resetTransform();
+    const hudW = vctx.canvas.width;
+    const hudH = vctx.canvas.height;
     vctx.fillStyle = 'rgba(0,0,0,0.6)';
-    vctx.fillRect(viewW - 180, 8, 172, 84);
+    vctx.fillRect(hudW - 180, 8, 172, 84);
     vctx.fillStyle = 'yellow';
     vctx.font = '12px monospace';
-    vctx.fillText('EDITOR ON', viewW - 170, 24);
+    vctx.fillText('EDITOR ON', hudW - 170, 24);
     vctx.fillStyle = '#fff';
     vctx.font = '11px monospace';
-    vctx.fillText(`Tool: ${currentTool}`, viewW - 170, 40);
+    vctx.fillText(`Tool: ${currentTool}`, hudW - 170, 40);
     const hoverVal = hoveredIndex !== null ? level.segments[hoveredIndex] : null;
     const hoverStr = hoveredIndex === null ? '-' : hoverVal === null ? 'GAP' : String(hoverVal);
-    vctx.fillText(`Hover idx: ${hoveredIndex ?? '-'} seg: ${hoverStr}`, viewW - 170, 56);
+    vctx.fillText(`Hover idx: ${hoveredIndex ?? '-'} seg: ${hoverStr}`, hudW - 170, 56);
     if (selectedObjectIndex !== null) {
       const so = level.objects[selectedObjectIndex];
-      vctx.fillText(`Selected: ${so.type} @${so.x}`, viewW - 170, 72);
+      vctx.fillText(`Selected: ${so.type} @${so.x}`, hudW - 170, 72);
     } else {
-      vctx.fillText(`Selected: -`, viewW - 170, 72);
+      vctx.fillText(`Selected: -`, hudW - 170, 72);
     }
     if (statusText) {
       vctx.fillStyle = 'rgba(255,255,255,0.9)';
-      vctx.fillText(statusText, viewW - 170, 88);
+      vctx.fillText(statusText, hudW - 170, 88);
     }
     vctx.restore();
     vctx.restore();
