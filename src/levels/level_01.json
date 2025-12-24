@@ -3,24 +3,17 @@
   "meta": {
     "title": "Sample Level 1",
     "author": "auto",
-    "width": 800,
+    "width": 5000,
     "parallax": [
       {
-        "src": "parallax/sky.svg",
-        "factor": 0.05,
-        "y": 0,
-        "tile": true,
-        "alpha": 1
-      },
-      {
-        "src": "parallax/mountains.svg",
+        "src": "parallax/mountains.png",
         "factor": 0.18,
         "y": 18,
         "tile": true,
         "alpha": 1
       },
       {
-        "src": "parallax/mid.svg",
+        "src": "parallax/trees-mid.png",
         "factor": 0.35,
         "y": 42,
         "tile": true,

@@ -111,11 +111,18 @@ export class AssetManager {
     for (const c of candidates) {
       try {
         const img = await this.loadImage(c);
-        if (img) return img;
-      } catch (_) {
+        // treat data-URL placeholders as failures when candidate was a real path
+        const isPlaceholder = typeof img.src === 'string' && img.src.startsWith('data:') && !c.startsWith('data:');
+        if (isPlaceholder) {
+          continue;
+        }
+
+        return img;
+      } catch (e) {
         // continue
       }
     }
+
     const placeholder = this.makePlaceholderImage(64, 64, 'missing');
     return placeholder;
   }

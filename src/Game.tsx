@@ -43,8 +43,9 @@ export default function Game() {
         const assets = meta.assets || [];
         if (!Array.isArray(assets) || assets.length === 0) {
           // no explicit assets: wait a small timeout so UI shows loading briefly
+          // continue afterwards so other meta-driven resources (parallax, sfx)
+          // still get a chance to load even when `meta.assets` is empty.
           await new Promise((r) => setTimeout(r, 500));
-          return;
         }
 
         totalToLoad = assets.length;

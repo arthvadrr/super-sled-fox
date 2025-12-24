@@ -22,7 +22,19 @@ export async function loadParallaxLayers(assetMgr: any, layersSpec: any[] = []):
       continue;
     }
     try {
-      const img = await assetMgr.loadImage(src);
+      // Try the literal src first, but fall back to common alternate extensions
+      // (e.g. .svg <-> .png) so levels can reference one while the asset exists
+      // with the other extension.
+      const candidates: string[] = [src];
+      try {
+        const lower = String(src).toLowerCase();
+        if (lower.endsWith('.svg')) candidates.push(src.replace(/\.svg$/i, '.png'));
+        else if (lower.endsWith('.png')) candidates.push(src.replace(/\.png$/i, '.svg'));
+      } catch (e) {
+        // ignore
+      }
+      const img = await assetMgr.loadImageAny(candidates);
+
       out.push({ img, factor, yOff, tile, alpha });
     } catch (e) {
       out.push({ img: null, factor, yOff, tile, alpha });
