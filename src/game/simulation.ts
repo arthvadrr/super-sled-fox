@@ -64,6 +64,8 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         y: currPlayer.y,
       });
     }
+    // preserve previous vertical velocity so we can emit landing effects
+    const prevVy = currPlayer.vy;
     currPlayer.y = avgY! - FEET_OFFSET;
     currPlayer.vy = 0;
     currPlayer.grounded = true;
@@ -197,6 +199,10 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         ctx.landingFlash = 0.15;
         ctx.effects.shake.shake(Math.min(6, currPlayer.vy / 60));
         void ctx.sfxLand?.play?.();
+        // emit landing particles at the player's feet
+        try {
+          ctx.effects.onLand(currPlayer.x, h - FEET_OFFSET, currPlayer.vy);
+        } catch (e) {}
       }
       currPlayer.y = h - FEET_OFFSET;
       currPlayer.vy = 0;
@@ -209,7 +215,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   for (const obj of objects) {
     const ox = obj.x ?? 0;
     // objects may omit a `y` field; use terrain height at the object's x as a sensible default
-    const oy = (typeof obj.y === 'number') ? obj.y : (getHeightAtX(currentLevel as any, Math.round(ox)) ?? currPlayer.y);
+    const oy = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(ox)) ?? currPlayer.y);
     const dx = currPlayer.x - ox;
     const dy = currPlayer.y - oy;
     const distSq = dx * dx + dy * dy;
