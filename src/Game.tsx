@@ -718,7 +718,18 @@ export default function Game() {
 
       // draw terrain (filled polygon) only in visible range
       // Draw each continuous ground chunk separately so gaps (null heights) remain empty.
-      vctx.fillStyle = '#2a6f3a';
+      // top-to-bottom ground gradient (white -> desaturated navy)
+      let groundFill: CanvasPattern | CanvasGradient | string = '#2a6f3a';
+      try {
+        const groundGrad = vctx.createLinearGradient(0, 0, 0, VIRTUAL_HEIGHT);
+        groundGrad.addColorStop(0, '#ffffff');
+        groundGrad.addColorStop(1, '#2f4056');
+        groundFill = groundGrad;
+        vctx.fillStyle = groundFill;
+      } catch (e) {
+        groundFill = '#2a6f3a';
+        vctx.fillStyle = groundFill as string;
+      }
       const DEBUG_GAP_MARKERS = true; // temporary visual aid: draw marker at top when sampler returns null
       let inChunk = false;
       let chunkFirstX = 0; // world x of first sample in chunk
@@ -731,7 +742,7 @@ export default function Game() {
             // small red marker at top to confirm sampler returned null here
             vctx.fillStyle = 'red';
             vctx.fillRect(Math.round(sx) - 1, 2, 2, 6);
-            vctx.fillStyle = '#2a6f3a';
+            vctx.fillStyle = groundFill as any;
           }
           // gap: if we were drawing a chunk, close and fill it
           if (inChunk) {
@@ -742,24 +753,147 @@ export default function Game() {
             vctx.lineTo(xStart, VIRTUAL_HEIGHT);
             vctx.closePath();
             vctx.fill();
-            // optionally stroke the top edge of the chunk
-            vctx.beginPath();
-            vctx.strokeStyle = 'rgba(0,0,0,0.25)';
-            vctx.lineWidth = 1;
-            {
-              const h0 = getHeightAtX(currentLevel as any, chunkFirstX) as number;
-              const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
-              const sy0 = isEditor ? wyToS(h0) : h0;
-              vctx.moveTo(sx0, sy0);
+            // draw a clipped procedural ice strip along the top edge of this chunk
+            try {
+              // compute top Y (smallest y) across the chunk in screen/virtual coords
+              let topY: number | null = null;
+              for (let xi_i = chunkFirstX; xi_i <= chunkLastX; xi_i++) {
+                const hy_i = getHeightAtX(currentLevel as any, xi_i);
+                if (hy_i === null) continue;
+                const sy_i = isEditor ? wyToS(hy_i) : hy_i;
+                topY = topY === null ? sy_i : Math.min(topY, sy_i);
+              }
+              if (topY !== null) {
+                const iceH = 12; // thickness in virtual pixels
+                const xStart = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+                const xEnd = isEditor ? wxToS(chunkLastX) : (chunkLastX - camOffsetX);
+
+                // recreate the top-edge polygon for clipping
+                vctx.beginPath();
+                {
+                  const h0 = getHeightAtX(currentLevel as any, chunkFirstX) as number;
+                  const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+                  const sy0 = isEditor ? wyToS(h0) : h0;
+                  vctx.moveTo(sx0, sy0);
+                }
+                for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
+                  const hy_i = getHeightAtX(currentLevel as any, sx_i);
+                  if (hy_i === null) break;
+                  const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
+                  const syp = isEditor ? wyToS(hy_i) : hy_i;
+                  vctx.lineTo(sxp, syp);
+                }
+                vctx.lineTo(xEnd, VIRTUAL_HEIGHT);
+                vctx.lineTo(xStart, VIRTUAL_HEIGHT);
+                vctx.closePath();
+
+                vctx.save();
+                vctx.clip();
+
+                // vertical gradient for icy look
+                const g = vctx.createLinearGradient(0, topY - iceH, 0, topY + 4);
+                g.addColorStop(0, '#e6fbff');
+                g.addColorStop(0.5, '#cfeeff');
+                g.addColorStop(1, 'rgba(200,240,255,0)');
+                vctx.fillStyle = g;
+
+                // draw a smoothed ice band following the top surface with variable thickness
+                try {
+                  const sampleStep = 1; // finer sampling for denser ice detail
+                  const pts: { sx: number; sy: number; t: number }[] = [];
+                  const base = 20; // thicker base thickness (wider ice)
+                  for (let wx = chunkFirstX; wx <= chunkLastX; wx += sampleStep) {
+                    const hy_w = getHeightAtX(currentLevel as any, wx);
+                    if (hy_w === null) continue;
+                    const sx_w = isEditor ? wxToS(wx) : (wx - camOffsetX);
+                    const sy_w = isEditor ? wyToS(hy_w) : hy_w;
+                    // stronger, more frequent variation: higher-frequency sine waves
+                    const t = base + Math.sin(wx * 0.5) * 10 + Math.sin(wx * 0.12) * 6;
+                    pts.push({ sx: Math.round(sx_w), sy: sy_w, t });
+                  }
+                  if (pts.length >= 2) {
+                    // determine gradient bounds
+                    let minY = Number.POSITIVE_INFINITY;
+                    let maxY = Number.NEGATIVE_INFINITY;
+                    for (const p of pts) {
+                      minY = Math.min(minY, p.sy - p.t);
+                      maxY = Math.max(maxY, p.sy);
+                    }
+                    const g2 = vctx.createLinearGradient(0, minY, 0, maxY + 4);
+                    g2.addColorStop(0, '#e6fbff');
+                    g2.addColorStop(0.5, '#cfeeff');
+                    g2.addColorStop(1, 'rgba(200,240,255,0)');
+                    vctx.fillStyle = g2;
+
+                    vctx.beginPath();
+                    // upper edge (ice top)
+                    for (let i = 0; i < pts.length; i++) {
+                      const p = pts[i];
+                      const y = p.sy - p.t;
+                      if (i === 0) vctx.moveTo(p.sx, y);
+                      else vctx.lineTo(p.sx, y);
+                    }
+                    // lower edge (surface) back to start
+                    for (let i = pts.length - 1; i >= 0; i--) {
+                      const p = pts[i];
+                      vctx.lineTo(p.sx, p.sy);
+                    }
+                    vctx.closePath();
+                    vctx.fill();
+                    // add a subtle glossy highlight along the top edge
+                    try {
+                      vctx.beginPath();
+                      for (let i = 0; i < pts.length; i++) {
+                        const p = pts[i];
+                        const y = p.sy - p.t + 1; // slightly offset from top
+                        if (i === 0) vctx.moveTo(p.sx, y);
+                        else vctx.lineTo(p.sx, y);
+                      }
+                      vctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                      vctx.lineWidth = 1;
+                      vctx.stroke();
+                    } catch (e) {
+                      /* ignore highlight errors */
+                    }
+                  }
+                } catch (e) {
+                  // fallback already handled
+                }
+
+                vctx.restore();
+              }
+            } catch (e) {
+              // safe fallback: ignore ice rendering errors
             }
-            for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
-              const hy_i = getHeightAtX(currentLevel as any, sx_i);
-              if (hy_i === null) break;
-              const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
-              const syp = isEditor ? wyToS(hy_i) : hy_i;
-              vctx.lineTo(sxp, syp);
+            // stroke the top edge with an icy look: darker base + light highlight
+            try {
+              const pts: { x: number; y: number }[] = [];
+              for (let sx_i = chunkFirstX; sx_i <= chunkLastX; sx_i++) {
+                const hy_i = getHeightAtX(currentLevel as any, sx_i);
+                if (hy_i === null) break;
+                const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
+                const syp = isEditor ? wyToS(hy_i) : hy_i;
+                pts.push({ x: Math.round(sxp), y: syp });
+              }
+              if (pts.length >= 2) {
+                // darker subtle bluish shadow line
+                vctx.beginPath();
+                vctx.lineWidth = 2;
+                vctx.strokeStyle = 'rgba(0,60,90,0.35)';
+                vctx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) vctx.lineTo(pts[i].x, pts[i].y);
+                vctx.stroke();
+                // light icy highlight
+                vctx.beginPath();
+                vctx.lineWidth = 1;
+                vctx.strokeStyle = 'rgba(170,220,255,0.95)';
+                vctx.moveTo(pts[0].x, pts[0].y - 0.5);
+                for (let i = 1; i < pts.length; i++) vctx.lineTo(pts[i].x, pts[i].y - 0.5);
+                vctx.stroke();
+              }
+            } catch (e) {
+              /* ignore stroke errors */
             }
-            vctx.stroke();
             vctx.beginPath();
             inChunk = false;
           }
@@ -788,24 +922,139 @@ export default function Game() {
         vctx.lineTo(xStart, VIRTUAL_HEIGHT);
         vctx.closePath();
         vctx.fill();
-        // stroke top edge of final chunk
-        vctx.beginPath();
-        vctx.strokeStyle = 'rgba(0,0,0,0.25)';
-        vctx.lineWidth = 1;
-        {
-          const h0 = getHeightAtX(currentLevel as any, chunkFirstX) as number;
-          const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
-          const sy0 = isEditor ? wyToS(h0) : h0;
-          vctx.moveTo(sx0, sy0);
+        // draw procedural ice strip for final chunk (same logic as above)
+        try {
+          let topY: number | null = null;
+          for (let xi_i = chunkFirstX; xi_i <= chunkLastX; xi_i++) {
+            const hy_i = getHeightAtX(currentLevel as any, xi_i);
+            if (hy_i === null) continue;
+            const sy_i = isEditor ? wyToS(hy_i) : hy_i;
+            topY = topY === null ? sy_i : Math.min(topY, sy_i);
+          }
+          if (topY !== null) {
+            const iceH = 12;
+            const sxStart = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+            const sxEnd = isEditor ? wxToS(chunkLastX) : (chunkLastX - camOffsetX);
+
+            vctx.beginPath();
+            {
+              const h0 = getHeightAtX(currentLevel as any, chunkFirstX) as number;
+              const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
+              const sy0 = isEditor ? wyToS(h0) : h0;
+              vctx.moveTo(sx0, sy0);
+            }
+            for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
+              const hy_i = getHeightAtX(currentLevel as any, sx_i);
+              if (hy_i === null) break;
+              const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
+              const syp = isEditor ? wyToS(hy_i) : hy_i;
+              vctx.lineTo(sxp, syp);
+            }
+            vctx.lineTo(sxEnd, VIRTUAL_HEIGHT);
+            vctx.lineTo(sxStart, VIRTUAL_HEIGHT);
+            vctx.closePath();
+
+            vctx.save();
+            vctx.clip();
+
+            const g = vctx.createLinearGradient(0, topY - iceH, 0, topY + 4);
+            g.addColorStop(0, '#e6fbff');
+            g.addColorStop(0.5, '#cfeeff');
+            g.addColorStop(1, 'rgba(200,240,255,0)');
+            vctx.fillStyle = g;
+
+            // draw a smoothed ice band for the final chunk (variable thickness)
+            try {
+              const sampleStep = 1;
+              const pts: { sx: number; sy: number; t: number }[] = [];
+              const base = 20;
+              for (let wx = chunkFirstX; wx <= chunkLastX; wx += sampleStep) {
+                const hy_w = getHeightAtX(currentLevel as any, wx);
+                if (hy_w === null) continue;
+                const sx_w = isEditor ? wxToS(wx) : (wx - camOffsetX);
+                const sy_w = isEditor ? wyToS(hy_w) : hy_w;
+                // stronger, more frequent variation: higher-frequency sine waves
+                const t = base + Math.sin(wx * 0.5) * 10 + Math.sin(wx * 0.12) * 6;
+                pts.push({ sx: Math.round(sx_w), sy: sy_w, t });
+              }
+              if (pts.length >= 2) {
+                let minY = Number.POSITIVE_INFINITY;
+                let maxY = Number.NEGATIVE_INFINITY;
+                for (const p of pts) {
+                  minY = Math.min(minY, p.sy - p.t);
+                  maxY = Math.max(maxY, p.sy);
+                }
+                const g2 = vctx.createLinearGradient(0, minY, 0, maxY + 4);
+                g2.addColorStop(0, '#e6fbff');
+                g2.addColorStop(0.5, '#cfeeff');
+                g2.addColorStop(1, 'rgba(200,240,255,0)');
+                vctx.fillStyle = g2;
+
+                vctx.beginPath();
+                for (let i = 0; i < pts.length; i++) {
+                  const p = pts[i];
+                  const y = p.sy - p.t;
+                  if (i === 0) vctx.moveTo(p.sx, y);
+                  else vctx.lineTo(p.sx, y);
+                }
+                for (let i = pts.length - 1; i >= 0; i--) {
+                  const p = pts[i];
+                  vctx.lineTo(p.sx, p.sy);
+                }
+                vctx.closePath();
+                vctx.fill();
+                try {
+                  vctx.beginPath();
+                  for (let i = 0; i < pts.length; i++) {
+                    const p = pts[i];
+                    const y = p.sy - p.t + 1;
+                    if (i === 0) vctx.moveTo(p.sx, y);
+                    else vctx.lineTo(p.sx, y);
+                  }
+                  vctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                  vctx.lineWidth = 1;
+                  vctx.stroke();
+                } catch (e) {
+                  /* ignore highlight errors */
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            vctx.restore();
+          }
+        } catch (e) {
+          // ignore
         }
-        for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
-          const hy_i = getHeightAtX(currentLevel as any, sx_i);
-          if (hy_i === null) break;
-          const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
-          const syp = isEditor ? wyToS(hy_i) : hy_i;
-          vctx.lineTo(sxp, syp);
+        // stroke top edge of final chunk with icy look (shadow + highlight)
+        try {
+          const pts2: { x: number; y: number }[] = [];
+          for (let sx_i = chunkFirstX; sx_i <= chunkLastX; sx_i++) {
+            const hy_i = getHeightAtX(currentLevel as any, sx_i);
+            if (hy_i === null) break;
+            const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
+            const syp = isEditor ? wyToS(hy_i) : hy_i;
+            pts2.push({ x: Math.round(sxp), y: syp });
+          }
+              if (pts2.length >= 2) {
+                vctx.beginPath();
+                vctx.lineWidth = 2;
+                vctx.strokeStyle = 'rgba(0,60,90,0.35)';
+                vctx.moveTo(pts2[0].x, pts2[0].y);
+                for (let i = 1; i < pts2.length; i++) vctx.lineTo(pts2[i].x, pts2[i].y);
+                vctx.stroke();
+
+                vctx.beginPath();
+                vctx.lineWidth = 1;
+                vctx.strokeStyle = 'rgba(170,220,255,0.95)';
+                vctx.moveTo(pts2[0].x, pts2[0].y - 0.5);
+                for (let i = 1; i < pts2.length; i++) vctx.lineTo(pts2[i].x, pts2[i].y - 0.5);
+                vctx.stroke();
+              }
+        } catch (e) {
+          /* ignore */
         }
-        vctx.stroke();
         vctx.beginPath();
       }
 
