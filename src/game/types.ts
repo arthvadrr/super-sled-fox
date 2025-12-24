@@ -7,6 +7,7 @@ export type GameState = 'title' | 'playing' | 'paused' | 'dead' | 'complete' | '
 
 export interface Camera {
   x: number;
+  y?: number;
 }
 
 export interface EditorHandlers {
@@ -21,7 +22,7 @@ export interface GameContext {
   state: GameState;
   currentLevel: any;
   currentLevelIndex: number;
-  
+
   currPlayer: Player;
   prevPlayer: Player;
   currCam: Camera;
@@ -30,7 +31,7 @@ export interface GameContext {
   lastGroundY: number | null;
   lastGroundAngle: number;
   ledgeGrace: number;
-  
+
   lastSlope: number;
   lastSlopeEff: number;
   lastAccelRaw: number;

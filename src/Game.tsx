@@ -74,7 +74,7 @@ export default function Game() {
 
     // Initialize player and camera
     const initialPlayer: Player = createPlayer();
-    const initialCam: Camera = { x: initialPlayer.x };
+    const initialCam: Camera = { x: initialPlayer.x, y: initialPlayer.y };
 
     // Initialize GameContext with all mutable game state
     const gameContext: GameContext = {
@@ -168,6 +168,7 @@ export default function Game() {
       gameContext.currPlayer.invulnTimer = 1.0; // grant a short invulnerability window after respawn
       gameContext.prevPlayer = { ...gameContext.currPlayer };
       gameContext.currCam.x = gameContext.currPlayer.x;
+      gameContext.currCam.y = gameContext.currPlayer.y;
       gameContext.prevCam = { ...gameContext.currCam };
       // resume play
       gameContext.state = 'playing';
@@ -203,6 +204,15 @@ export default function Game() {
       const minCam = halfW;
       const maxCam = Math.max(halfW, levelWidth - halfW);
       gameContext.currCam.x = Math.max(minCam, Math.min(maxCam, gameContext.currCam.x));
+      // Vertical camera follow: smooth toward player Y and clamp to level vertical bounds
+      const levelHeight = (gameContext.currentLevel.meta && (gameContext.currentLevel.meta as any).virtualHeight) || VIRTUAL_HEIGHT;
+      const halfH = VIRTUAL_HEIGHT / 2;
+      const minCamY = halfH;
+      const maxCamY = Math.max(halfH, levelHeight - halfH);
+      const targetCamY = gameContext.currPlayer.y;
+      if (typeof gameContext.currCam.y !== 'number') gameContext.currCam.y = targetCamY;
+      gameContext.currCam.y += (targetCamY - gameContext.currCam.y) * t;
+      gameContext.currCam.y = Math.max(minCamY, Math.min(maxCamY, gameContext.currCam.y));
       // Airborne rotation easing: when not grounded, ease angle toward neutral (0)
       if (!gameContext.currPlayer.grounded) {
         const ANGLE_EASE = 6; // higher = faster easing
@@ -394,6 +404,9 @@ export default function Game() {
                   canvas: canvasElInner,
                   screenToWorld: screenToWorldFn,
                   level: currentLevel as any,
+                  // allow per-level editor tuning via meta
+                  segmentLen: (currentLevel.meta && (currentLevel.meta as any).segmentLen) || 1,
+                  virtualHeight: (currentLevel.meta && (currentLevel.meta as any).virtualHeight) || VIRTUAL_HEIGHT,
                   onChange() {
                     // noop for now; could mark level dirty
                   },
@@ -427,6 +440,145 @@ export default function Game() {
                 importBtn.style.background = '#222';
                 importBtn.style.color = '#fff';
                 document.body.appendChild(importBtn);
+
+                // --- Level resize UI ---
+                const widthLabel = document.createElement('label');
+                widthLabel.style.position = 'fixed';
+                widthLabel.style.right = '240px';
+                widthLabel.style.bottom = '12px';
+                widthLabel.style.zIndex = '9999';
+                widthLabel.style.color = '#fff';
+                widthLabel.style.fontFamily = 'monospace';
+                widthLabel.style.fontSize = '12px';
+                widthLabel.style.display = 'flex';
+                widthLabel.style.gap = '6px';
+
+                const widthInput = document.createElement('input');
+                widthInput.type = 'number';
+                widthInput.min = '1';
+                widthInput.value = String((currentLevel.meta && (currentLevel.meta as any).width) || (currentLevel.segments && currentLevel.segments.length) || 0);
+                widthInput.style.width = '80px';
+                widthInput.style.padding = '4px';
+                widthInput.style.background = '#222';
+                widthInput.style.color = '#fff';
+                widthInput.style.border = '1px solid #444';
+
+                const resizeBtn = document.createElement('button');
+                resizeBtn.textContent = 'Resize Width';
+                resizeBtn.style.padding = '6px 8px';
+                resizeBtn.style.background = '#222';
+                resizeBtn.style.color = '#fff';
+
+                widthLabel.appendChild(widthInput);
+                widthLabel.appendChild(resizeBtn);
+                document.body.appendChild(widthLabel);
+
+                const heightLabel = document.createElement('label');
+                heightLabel.style.position = 'fixed';
+                heightLabel.style.right = '420px';
+                heightLabel.style.bottom = '12px';
+                heightLabel.style.zIndex = '9999';
+                heightLabel.style.color = '#fff';
+                heightLabel.style.fontFamily = 'monospace';
+                heightLabel.style.fontSize = '12px';
+                heightLabel.style.display = 'flex';
+                heightLabel.style.gap = '6px';
+
+                const heightInput = document.createElement('input');
+                heightInput.type = 'number';
+                heightInput.min = '0';
+                heightInput.value = String((currentLevel.meta && (currentLevel.meta as any).virtualHeight) || VIRTUAL_HEIGHT);
+                heightInput.style.width = '80px';
+                heightInput.style.padding = '4px';
+                heightInput.style.background = '#222';
+                heightInput.style.color = '#fff';
+                heightInput.style.border = '1px solid #444';
+
+                const setHeightBtn = document.createElement('button');
+                setHeightBtn.textContent = 'Set Height';
+                setHeightBtn.style.padding = '6px 8px';
+                setHeightBtn.style.background = '#222';
+                setHeightBtn.style.color = '#fff';
+
+                heightLabel.appendChild(heightInput);
+                heightLabel.appendChild(setHeightBtn);
+                document.body.appendChild(heightLabel);
+
+                // --- Smooth UI ---
+                const smoothLabel = document.createElement('label');
+                smoothLabel.style.position = 'fixed';
+                smoothLabel.style.right = '560px';
+                smoothLabel.style.bottom = '12px';
+                smoothLabel.style.zIndex = '9999';
+                smoothLabel.style.color = '#fff';
+                smoothLabel.style.fontFamily = 'monospace';
+                smoothLabel.style.fontSize = '12px';
+                smoothLabel.style.display = 'flex';
+                smoothLabel.style.gap = '6px';
+
+                const radiusInput = document.createElement('input');
+                radiusInput.type = 'number';
+                radiusInput.min = '1';
+                radiusInput.value = '1';
+                radiusInput.style.width = '48px';
+                radiusInput.style.padding = '4px';
+                radiusInput.style.background = '#222';
+                radiusInput.style.color = '#fff';
+                radiusInput.style.border = '1px solid #444';
+
+                const smoothBtn = document.createElement('button');
+                smoothBtn.textContent = 'Smooth';
+                smoothBtn.style.padding = '6px 8px';
+                smoothBtn.style.background = '#222';
+                smoothBtn.style.color = '#fff';
+
+                smoothLabel.appendChild(radiusInput);
+                smoothLabel.appendChild(smoothBtn);
+                document.body.appendChild(smoothLabel);
+
+                smoothBtn.onclick = () => {
+                  try {
+                    const r = Math.max(1, Math.floor(Number(radiusInput.value) || 1));
+                    const fn = (gameContext.editorStop as any)?.smoothSegments as ((r: number) => void) | undefined;
+                    if (fn) fn(r);
+                  } catch (e) { }
+                };
+
+                // helper: safely resize segments array
+                const resizeSegments = (newLen: number) => {
+                  if (!Array.isArray(currentLevel.segments)) currentLevel.segments = [] as any;
+                  const old = currentLevel.segments;
+                  const oldLen = old.length;
+                  if (newLen === oldLen) return;
+                  if (newLen > oldLen) {
+                    // append copies of last non-null or default 120
+                    let fill = 120;
+                    for (let i = oldLen - 1; i >= 0; i--) {
+                      if (old[i] !== null && typeof old[i] === 'number') { fill = old[i] as number; break; }
+                    }
+                    for (let i = oldLen; i < newLen; i++) old.push(fill);
+                  } else {
+                    // truncate and clamp objects
+                    old.length = newLen;
+                    if (Array.isArray(currentLevel.objects)) {
+                      currentLevel.objects = currentLevel.objects.filter((o: any) => (o.x || 0) < newLen);
+                    }
+                  }
+                  // update meta.width
+                  if (!currentLevel.meta) currentLevel.meta = {} as any;
+                  (currentLevel.meta as any).width = newLen;
+                };
+
+                resizeBtn.onclick = () => {
+                  const v = Math.max(1, Math.floor(Number(widthInput.value) || 0));
+                  resizeSegments(v);
+                };
+
+                setHeightBtn.onclick = () => {
+                  const hv = Math.max(0, Math.floor(Number(heightInput.value) || 0));
+                  if (!currentLevel.meta) currentLevel.meta = {} as any;
+                  (currentLevel.meta as any).virtualHeight = hv;
+                };
 
                 const showError = (msg: string) => {
                   const el = document.createElement('div');
@@ -505,7 +657,7 @@ export default function Game() {
                 window.addEventListener('dragover', onDragOver);
 
                 // attach to editor handlers for cleanup
-                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver };
+                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -617,6 +769,9 @@ export default function Game() {
                     try { nodes.exportBtn.remove(); } catch (e) { }
                     try { nodes.importBtn.remove(); } catch (e) { }
                     try { nodes.fileInput.remove(); } catch (e) { }
+                    try { nodes.widthLabel.remove(); } catch (e) { }
+                    try { nodes.heightLabel.remove(); } catch (e) { }
+                    try { nodes.smoothLabel.remove(); } catch (e) { }
                     try { window.removeEventListener('drop', nodes.onDrop); } catch (e) { }
                     try { window.removeEventListener('dragover', nodes.onDragOver); } catch (e) { }
                   }

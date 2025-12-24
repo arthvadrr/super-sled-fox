@@ -30,12 +30,26 @@ export function getHeightAtX(level: Level, x: number): number | null {
 // Return slope (dy/dx) at x using the discrete segment heights.
 // If unavailable (gap), returns null.
 export function getSlopeAtX(level: Level, x: number): number | null {
+  if (!level || !Array.isArray(level.segments)) return null;
+  const n = level.segments.length;
+  // windowed slope: use heights w units left/right and compute central difference
+  const w = 2; // window radius in segments
+  const xl = Math.max(0, x - w);
+  const xr = Math.min(n - 1, x + w);
+  const hl = getHeightAtX(level, xl);
+  const hr = getHeightAtX(level, xr);
+  if (hl !== null && hr !== null) {
+    // slope = dy/dx, dx = xr - xl
+    const dx = xr - xl;
+    if (dx === 0) return 0;
+    return (hr - hl) / dx;
+  }
+  // fallback to discrete neighbor slope if window samples unavailable
   const i0 = Math.floor(x);
-  const i1 = Math.min(level.segments.length - 1, i0 + 1);
+  const i1 = Math.min(n - 1, i0 + 1);
   const h0 = level.segments[i0];
   const h1 = level.segments[i1];
   if (h0 === null || h1 === null) return null;
-  // since indices are 1 unit apart, slope is simply delta
   return (h1 as number) - (h0 as number);
 }
 
