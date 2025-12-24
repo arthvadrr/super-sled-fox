@@ -93,6 +93,13 @@ export class AssetManager {
         audio.addEventListener('error', onerr);
       });
       // store and return audio element (it may still be broken, but is usable)
+      // If the element failed to load (e.g. server returned HTML/index),
+      // fall back to a silent SafeAudio so callers don't try to play invalid media.
+      if ((audio as any).error) {
+        const s = this.makeSilentAudio();
+        this.audios.set(name, s);
+        return s;
+      }
       this.audios.set(name, audio);
       return audio;
     } catch (e) {

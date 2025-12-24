@@ -232,6 +232,12 @@ export class AnimationStateMachine {
     }
   }
 
+  // Backwards-compatible alias: some codebases call `setState` on entities
+  // to change animation state. Provide a thin wrapper to `play` for that API.
+  setState(state: string) {
+    this.play(state);
+  }
+
   update(dt: number) {
     for (const L of this.layers) {
       L.sprite.update(dt);

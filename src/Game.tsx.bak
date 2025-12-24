@@ -25,10 +25,6 @@ import { simulate } from './game/simulation';
 import { draw } from './game/renderer';
 import { loadLevelAssets, loadLevelByIndex } from './game/levelLoader';
 
-// Editor zoom bounds (fall back to sensible defaults when not provided at build-time)
-const EDITOR_ZOOM_MIN = (globalThis as any).EDITOR_ZOOM_MIN ?? 0.25;
-const EDITOR_ZOOM_MAX = (globalThis as any).EDITOR_ZOOM_MAX ?? 4;
-
 // Runtime mutable level state (module-level for now, will be moved to context)
 let currentLevelIndex = 0;
 let currentLevel = JSON.parse(JSON.stringify(LEVELS[currentLevelIndex].level));
@@ -50,7 +46,122 @@ export default function Game() {
     let totalToLoad = 0;
     let loadingProgress = 0;
 
-    // Level assets will be loaded after `gameContext` is initialized below
+    async function loadLevelAssets() {
+      try {
+        const meta: any = currentLevel.meta || {};
+        const assets = meta.assets || [];
+        if (!Array.isArray(assets) || assets.length === 0) {
+          // no explicit assets: wait a small timeout so UI shows loading briefly
+          // continue afterwards so other meta-driven resources (parallax, sfx)
+          // still get a chance to load even when `meta.assets` is empty.
+          await new Promise((r) => setTimeout(r, 500));
+        }
+
+        totalToLoad = assets.length;
+        const promises = assets.map(async (a: string) => {
+          // heuristic: image if png/jpg, audio if mp3/ogg/m4a
+          const lower = a.toLowerCase();
+          if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp')) {
+            await assetManager.loadImage(a);
+          } else if (lower.endsWith('.mp3') || lower.endsWith('.ogg') || lower.endsWith('.m4a') || lower.endsWith('.wav')) {
+            await assetManager.loadAudio(a);
+          } else {
+            // try image first
+            await assetManager.loadImage(a).catch(() => assetManager.loadAudio(a).catch(() => { }));
+          }
+          loadedCount++;
+          loadingProgress = totalToLoad > 0 ? loadedCount / totalToLoad : 1;
+        });
+
+        // race between asset loading and a max timeout so loading never blocks forever
+        await Promise.race([Promise.all(promises), new Promise((r) => setTimeout(r, 2000))]);
+        // Attempt to create SFX hooks from meta.sfx (silent/no-op on missing)
+        try {
+          const sfxMeta: any = meta.sfx || {};
+          sfxJump = await audioManager.createSound(sfxMeta.jump || 'sfx/jump.mp3').catch(() => null);
+          sfxLand = await audioManager.createSound(sfxMeta.land || 'sfx/land.mp3').catch(() => null);
+          sfxCheckpoint = await audioManager.createSound(sfxMeta.checkpoint || 'sfx/checkpoint.mp3').catch(() => null);
+          sfxDeath = await audioManager.createSound(sfxMeta.death || 'sfx/death.mp3').catch(() => null);
+          sfxComplete = await audioManager.createSound(sfxMeta.complete || 'sfx/complete.mp3').catch(() => null);
+        } catch (e) {
+          // ignore — sounds will be null
+        }
+        // Load parallax layers from meta (optional) via helper
+        try {
+          const layersSpec: any[] = meta.parallax || meta.layers || [];
+          const loaded = await loadParallaxLayers(assetManager, layersSpec);
+          parallax.push(...loaded);
+        } catch (e) {
+          // ignore
+        }
+        // try load a player sprite sheet (optional)
+        try {
+          const pImg = await assetManager.loadImage('sprites/player.png').catch(() => null);
+          if (pImg) {
+            const sheet = createSpriteSheet(pImg, 32, 32);
+            const base = new AnimatedSprite(sheet);
+            base.addAnim('idle', [0], 6, true);
+            const runFrames: number[] = [];
+            for (let i = 1; i <= Math.min(4, sheet.frameCount - 1); i++) runFrames.push(i);
+            if (runFrames.length > 0) base.addAnim('run', runFrames, 14, true);
+            if (sheet.frameCount > 5) base.addAnim('jump', [5], 12, false);
+            if (sheet.frameCount > 6) base.addAnim('fall', [6], 12, false);
+            const entity = new AnimationStateMachine();
+            entity.addLayer(base, { fallback: 'idle' }, 0, 0);
+            // try load an accessory overlay (hat/gear) that aligns with same frames
+            try {
+              const acc = await assetManager.loadImage('sprites/player_hat.png').catch(() => null);
+              if (acc) {
+                const accSheet = createSpriteSheet(acc, 32, 32);
+                const accSprite = new AnimatedSprite(accSheet);
+                // mirror animations from base where possible
+                accSprite.addAnim('idle', [0], 6, true);
+                if (accSheet.frameCount > 1) {
+                  const f: number[] = [];
+                  for (let i = 1; i <= Math.min(4, accSheet.frameCount - 1); i++) f.push(i);
+                  if (f.length) accSprite.addAnim('run', f, 14, true);
+                }
+                entity.addLayer(accSprite, { fallback: 'idle' }, 0, -8);
+              }
+            } catch (e) {
+              /* ignore accessory */
+            }
+            playerEntity = entity;
+          }
+        } catch (e) {
+          // ignore — sprite optional
+        }
+      } catch (e) {
+        // ignore — fallthrough to title
+      }
+    }
+
+    loadLevelAssets().then(() => {
+      if (!loadingCancelled) stateRef.current = 'title';
+    });
+
+    // helper to load a level by pack index at runtime
+    async function loadLevelByIndex(idx: number) {
+      if (idx < 0 || idx >= LEVELS.length) return;
+      currentLevelIndex = idx;
+      currentLevel = JSON.parse(JSON.stringify(LEVELS[idx].level));
+      // clear runtime assets/visuals that are level-specific
+      parallax.length = 0;
+      // reset checkpoint/start state for new level
+      try {
+        const startObjNew = (currentLevel.objects || []).find((o: any) => o.type === 'start');
+        lastCheckpointX = startObjNew ? startObjNew.x : PLAYER_DEFAULTS.startX;
+        reachedFinish = false;
+      } catch (e) {
+        // ignore
+      }
+      // attempt to load assets for the new level
+      await loadLevelAssets();
+      // respawn player at start/checkpoint of new level
+      respawn();
+      // briefly show restart hint so player knows R will restart
+      restartHintTimer = 2.5;
+    }
 
     // Audio unlock gate: unlock audio on first user gesture
     const unlockOnce = () => {
@@ -143,14 +254,6 @@ export default function Game() {
       lastTime: performance.now()
     };
 
-    // Use extracted level loading function now that `gameContext` exists
-    loadLevelAssets(gameContext).then(() => {
-      if (!loadingCancelled) {
-        stateRef.current = 'title';
-        gameContext.state = 'title';
-      }
-    });
-
     function respawn() {
       const rx = gameContext.lastCheckpointX ?? PLAYER_DEFAULTS.startX;
       gameContext.currPlayer.x = rx;
@@ -242,32 +345,30 @@ export default function Game() {
     function loop(now: number) {
       // pause sim when page is hidden
       if (document.hidden) {
-        gameContext.lastTime = now;
+        lastTime = now;
         rafId = requestAnimationFrame(loop);
         return;
       }
 
-      let delta = (now - gameContext.lastTime) / 1000;
+      let delta = (now - lastTime) / 1000;
       if (delta > 0.25) delta = 0.25; // clamp to avoid spiral of death
       // update a smoothed FPS estimate
-      if (delta > 0) gameContext.fps += (1 / delta - gameContext.fps) * 0.08;
+      if (delta > 0) fps += (1 / delta - fps) * 0.08;
       // decay landing flash timer
-      gameContext.landingFlash = Math.max(0, gameContext.landingFlash - delta);
+      landingFlash = Math.max(0, landingFlash - delta);
       // decay transient restart hint timer
-      gameContext.restartHintTimer = Math.max(0, (gameContext.restartHintTimer || 0) - delta);
+      restartHintTimer = Math.max(0, (restartHintTimer || 0) - delta);
       // handle crash/death timers (fade only) even when not playing
-      // simulation may set gameContext.state = 'dead' without updating stateRef.current,
-      // so check both to ensure crash timers are decremented reliably.
-      if (stateRef.current === 'dead' || gameContext.state === 'dead') {
-        if (gameContext.crashTimer > 0) {
-          gameContext.crashTimer -= delta;
-          gameContext.crashFade = Math.max(0, gameContext.crashFade - delta);
+      if (stateRef.current === 'dead') {
+        if (crashTimer > 0) {
+          crashTimer -= delta;
+          crashFade = Math.max(0, crashFade - delta);
         } else {
           // no auto-respawn; wait for user to press `R` to respawn
         }
       }
-      gameContext.lastTime = now;
-      gameContext.accumulator += delta;
+      lastTime = now;
+      accumulator += delta;
       // handle global input for state changes (pause, restart, start)
       const escPressed = input.get('Escape').wasPressed;
       const rPressed = input.get('r').wasPressed;
@@ -278,26 +379,25 @@ export default function Game() {
         // Only capture a snapshot for missed-press handling when the player is
         // currently grounded. We shouldn't record a 'missed' press while
         // airborne because that would later trigger forced jumps incorrectly.
-        if (gameContext.currPlayer.grounded) {
-          gameContext.spacePressSnapshot = {
+        if (currPlayer.grounded) {
+          spacePressSnapshot = {
             t: performance.now(),
             state: stateRef.current,
-            grounded: gameContext.currPlayer.grounded,
-            wasGrounded: gameContext.currPlayer.wasGrounded,
-            coyoteTimer: gameContext.coyoteTimer,
-            jumpBuffer: gameContext.jumpBuffer,
-            jumpLock: gameContext.jumpLock,
-            vy: gameContext.currPlayer.vy,
-            y: gameContext.currPlayer.y,
+            grounded: currPlayer.grounded,
+            wasGrounded: currPlayer.wasGrounded,
+            coyoteTimer,
+            jumpBuffer,
+            jumpLock,
+            vy: currPlayer.vy,
+            y: currPlayer.y,
           };
-          // When playing and grounded, schedule a pending immediate jump so the
-          // physics step will consume it as soon as possible. This is more
-          // reliable than relying on transient contact samples when presses
-          // occur near the end of the frame.
-          if (stateRef.current === 'playing' && gameContext.jumpLock <= 0) {
-            gameContext.pendingImmediateJump = true;
+          // If we appear grounded now and contact samples from the last simulate show
+          // we're near the ground, request an immediate jump to be applied inside
+          // the next physics step to avoid missing the transient wasPressed edge.
+          if (stateRef.current === 'playing' && spacePressSnapshot.grounded && jumpLock <= 0 && lastContactBack !== null && lastContactFront !== null && lastNearGround) {
+            pendingImmediateJump = true;
             // eslint-disable-next-line no-console
-            console.log('[jump-debug] requested pendingImmediateJump from main loop', { t: performance.now(), press: gameContext.spacePressSnapshot });
+            console.log('[jump-debug] requested pendingImmediateJump from main loop', { t: performance.now(), press: spacePressSnapshot });
           }
         }
       }
@@ -326,14 +426,10 @@ export default function Game() {
         const nextIdx = currentLevelIndex + 1;
         if (nextIdx < LEVELS.length) {
           // show loading state while switching levels
-          gameContext.state = 'loading';
           stateRef.current = 'loading';
-          loadLevelByIndex(gameContext, nextIdx, respawn).then(() => {
+          loadLevelByIndex(nextIdx).then(() => {
             // only resume play if still in loading state
-            if (stateRef.current === 'loading') {
-              gameContext.state = 'playing';
-              stateRef.current = 'playing';
-            }
+            if (stateRef.current === 'loading') stateRef.current = 'playing';
           });
         } else {
           // no next level: restart current level
@@ -345,34 +441,31 @@ export default function Game() {
       // toggle editor state when compile-time enabled
       if (ePressed && typeof EDITOR_ENABLED !== 'undefined' && EDITOR_ENABLED) {
         if (stateRef.current !== 'editor') {
-          gameContext.lastNonEditorState = stateRef.current;
+          lastNonEditorState = stateRef.current;
           stateRef.current = 'editor';
         } else {
-          stateRef.current = gameContext.lastNonEditorState || 'title';
+          stateRef.current = lastNonEditorState || 'title';
         }
       }
 
       // detect simple game-state transitions and reset timing to avoid large accumulator
       if (lastGameState !== stateRef.current) {
         lastGameState = stateRef.current;
-        // keep gameContext.state in sync with the external stateRef so
-        // rendering and other systems that read ctx.state behave correctly.
-        gameContext.state = stateRef.current;
         // prevent interpolation artifacts by syncing snapshots
-        gameContext.prevPlayer = { ...gameContext.currPlayer };
-        gameContext.prevCam = { ...gameContext.currCam };
-        gameContext.accumulator = 0;
-        gameContext.lastTime = now;
+        prevPlayer = { ...currPlayer };
+        prevCam = { ...currCam };
+        accumulator = 0;
+        lastTime = now;
         // start/stop editor when entering/exiting editor state
         try {
           const canvasElInner = canvasRef.current!;
           if (typeof EDITOR_ENABLED !== 'undefined' && EDITOR_ENABLED) {
             if (stateRef.current === 'editor') {
-              if (!gameContext.editorStop) {
+              if (!editorStop) {
                 // initialize editor camera from gameplay cam/player
-                gameContext.editorCamX = gameContext.currCam.x;
-                gameContext.editorCamY = gameContext.currPlayer.y || VIRTUAL_HEIGHT / 2;
-                gameContext.editorZoom = gameContext.lastEditorZoom || 1;
+                editorCamX = currCam.x;
+                editorCamY = currPlayer.y || VIRTUAL_HEIGHT / 2;
+                editorZoom = lastEditorZoom || 1;
                 canvasElInner.dataset.editorActive = '1';
                 // screenToWorld maps client pixels -> virtual coords -> world coords
                 const screenToWorldFn = (clientX: number, clientY: number) => {
@@ -385,12 +478,12 @@ export default function Game() {
                   const px = (clientX - destX) / scale;
                   const py = (clientY - destY) / scale;
                   // when in editor mode, convert virtual px/py -> world using editor cam + zoom
-                  const wx = (px - VIRTUAL_WIDTH / 2) / gameContext.editorZoom + gameContext.editorCamX;
-                  const wy = (py - VIRTUAL_HEIGHT / 2) / gameContext.editorZoom + gameContext.editorCamY;
+                  const wx = (px - VIRTUAL_WIDTH / 2) / editorZoom + editorCamX;
+                  const wy = (py - VIRTUAL_HEIGHT / 2) / editorZoom + editorCamY;
                   return { x: wx, y: wy };
                 };
 
-                gameContext.editorStop = startEditor({
+                editorStop = startEditor({
                   canvas: canvasElInner,
                   screenToWorld: screenToWorldFn,
                   level: currentLevel as any,
@@ -505,7 +598,7 @@ export default function Game() {
                 window.addEventListener('dragover', onDragOver);
 
                 // attach to editor handlers for cleanup
-                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver };
+                (editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -520,17 +613,17 @@ export default function Game() {
                   const px = (ev.clientX - destX) / scale;
                   const py = (ev.clientY - destY) / scale;
                   // world under cursor before zoom
-                  const worldBeforeX = (px - VIRTUAL_WIDTH / 2) / gameContext.editorZoom + gameContext.editorCamX;
-                  const worldBeforeY = (py - VIRTUAL_HEIGHT / 2) / gameContext.editorZoom + gameContext.editorCamY;
+                  const worldBeforeX = (px - VIRTUAL_WIDTH / 2) / editorZoom + editorCamX;
+                  const worldBeforeY = (py - VIRTUAL_HEIGHT / 2) / editorZoom + editorCamY;
                   // delta from wheel: use exponential scale
                   const factor = Math.pow(1.1, -ev.deltaY / 100);
-                  let newZoom = gameContext.editorZoom * factor;
+                  let newZoom = editorZoom * factor;
                   newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, newZoom));
                   // adjust camera so worldUnderCursor stays stable
-                  gameContext.editorCamX = worldBeforeX - (px - VIRTUAL_WIDTH / 2) / newZoom;
-                  gameContext.editorCamY = worldBeforeY - (py - VIRTUAL_HEIGHT / 2) / newZoom;
-                  gameContext.editorZoom = newZoom;
-                  gameContext.lastEditorZoom = gameContext.editorZoom;
+                  editorCamX = worldBeforeX - (px - VIRTUAL_WIDTH / 2) / newZoom;
+                  editorCamY = worldBeforeY - (py - VIRTUAL_HEIGHT / 2) / newZoom;
+                  editorZoom = newZoom;
+                  lastEditorZoom = editorZoom;
                 };
                 window.addEventListener('wheel', wheelHandler, { passive: false });
 
@@ -566,8 +659,8 @@ export default function Game() {
                   panLastPx = px;
                   panLastPy = py;
                   // move editor cam by delta / zoom
-                  gameContext.editorCamX -= dx / gameContext.editorZoom;
-                  gameContext.editorCamY -= dy / gameContext.editorZoom;
+                  editorCamX -= dx / editorZoom;
+                  editorCamY -= dy / editorZoom;
                 };
                 const onPointerUpPan = (ev: PointerEvent) => {
                   if (panPointerId !== ev.pointerId) return;
@@ -582,26 +675,26 @@ export default function Game() {
                 const keydownHandler = (ev: KeyboardEvent) => {
                   if (stateRef.current !== 'editor') return;
                   if (ev.key === '=' || ev.key === '+') {
-                    let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, gameContext.editorZoom * 1.1));
-                    gameContext.editorZoom = newZoom; gameContext.lastEditorZoom = gameContext.editorZoom;
+                    let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, editorZoom * 1.1));
+                    editorZoom = newZoom; lastEditorZoom = editorZoom;
                   } else if (ev.key === '-') {
-                    let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, gameContext.editorZoom / 1.1));
-                    gameContext.editorZoom = newZoom; gameContext.lastEditorZoom = gameContext.editorZoom;
+                    let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, editorZoom / 1.1));
+                    editorZoom = newZoom; lastEditorZoom = editorZoom;
                   } else if (ev.key === 'z') {
-                    gameContext.editorZoom = 1; gameContext.lastEditorZoom = 1; gameContext.editorCamX = gameContext.currPlayer.x; gameContext.editorCamY = gameContext.currPlayer.y || VIRTUAL_HEIGHT / 2;
+                    editorZoom = 1; lastEditorZoom = 1; editorCamX = currPlayer.x; editorCamY = currPlayer.y || VIRTUAL_HEIGHT / 2;
                   }
                 };
                 window.addEventListener('keydown', keydownHandler);
 
                 // store these handlers on editorStop so we can remove them when stopping
-                (gameContext.editorStop as any).__editorHandlers = { wheelHandler, onPointerDownPan, onPointerMovePan, onPointerUpPan, keydownHandler };
+                (editorStop as any).__editorHandlers = { wheelHandler, onPointerDownPan, onPointerMovePan, onPointerUpPan, keydownHandler };
               }
             } else {
-              if (gameContext.editorStop) {
+              if (editorStop) {
                 try { if (canvasRef.current) canvasRef.current.dataset.editorActive = '0'; } catch (e) { }
                 // remove editor-specific handlers
                 try {
-                  const h = (gameContext.editorStop as any).__editorHandlers;
+                  const h = (editorStop as any).__editorHandlers;
                   if (h) {
                     window.removeEventListener('wheel', h.wheelHandler);
                     const canvasElInner2 = canvasRef.current!;
@@ -612,7 +705,7 @@ export default function Game() {
                   }
                 } catch (e) { }
                 try {
-                  const nodes = (gameContext.editorStop as any).__exportImportNodes;
+                  const nodes = (editorStop as any).__exportImportNodes;
                   if (nodes) {
                     try { nodes.exportBtn.remove(); } catch (e) { }
                     try { nodes.importBtn.remove(); } catch (e) { }
@@ -621,8 +714,8 @@ export default function Game() {
                     try { window.removeEventListener('dragover', nodes.onDragOver); } catch (e) { }
                   }
                 } catch (e) { }
-                try { (gameContext.editorStop as any)(); } catch (e) { }
-                gameContext.editorStop = null;
+                try { editorStop(); } catch (e) { }
+                editorStop = null;
               }
             }
           }
@@ -632,9 +725,9 @@ export default function Game() {
       }
 
       if (stateRef.current === 'playing') {
-        while (gameContext.accumulator >= FIXED_DT) {
+        while (accumulator >= FIXED_DT) {
           // advance snapshots
-          gameContext.prevPlayer = { ...gameContext.currPlayer };
+          prevPlayer = { ...currPlayer };
           gameContext.prevCam = { ...gameContext.currCam };
           // reset jump-applied marker for this fixed-step batch
           gameContext.jumpAppliedThisFrame = false;
@@ -642,62 +735,52 @@ export default function Game() {
           simulateStep(FIXED_DT, input);
           gameContext.accumulator -= FIXED_DT;
         }
-        // If simulation requested a state change (e.g. reached finish sets ctx.state='complete'),
-        // ensure the external `stateRef` mirrors it so the main loop stops simulating and UI updates.
-        if (gameContext.state !== stateRef.current) {
-          stateRef.current = gameContext.state as GameState;
-          lastGameState = stateRef.current;
-          gameContext.prevPlayer = { ...gameContext.currPlayer };
-          gameContext.prevCam = { ...gameContext.currCam };
-          gameContext.accumulator = 0;
-          gameContext.lastTime = now;
-        }
       } else {
         // not playing: don't advance sim; clamp accumulator so alpha stays sensible
-        gameContext.accumulator = 0;
+        accumulator = 0;
       }
 
       drawGame();
       // editor keyboard pan/zoom handling
       if (stateRef.current === 'editor') {
         const basePanSpeed = 180; // world units per second
-        const panSpeed = basePanSpeed * Math.min(0.033, delta) / Math.max(0.0001, gameContext.editorZoom);
-        if (input.get('w').isDown || input.get('ArrowUp').isDown) gameContext.editorCamY -= panSpeed;
-        if (input.get('s').isDown || input.get('ArrowDown').isDown) gameContext.editorCamY += panSpeed;
-        if (input.get('a').isDown || input.get('ArrowLeft').isDown) gameContext.editorCamX -= panSpeed;
-        if (input.get('d').isDown || input.get('ArrowRight').isDown) gameContext.editorCamX += panSpeed;
+        const panSpeed = basePanSpeed * Math.min(0.033, delta) / Math.max(0.0001, editorZoom);
+        if (input.get('w').isDown || input.get('ArrowUp').isDown) editorCamY -= panSpeed;
+        if (input.get('s').isDown || input.get('ArrowDown').isDown) editorCamY += panSpeed;
+        if (input.get('a').isDown || input.get('ArrowLeft').isDown) editorCamX -= panSpeed;
+        if (input.get('d').isDown || input.get('ArrowRight').isDown) editorCamX += panSpeed;
         // keyboard zoom handled via keydown listener attached when editor starts
       }
 
       // if space was pressed this frame but no jump was applied during simulation, log detailed snapshot
-      if (gameContext.spacePressSnapshot && !gameContext.jumpAppliedThisFrame) {
+      if (spacePressSnapshot && !jumpAppliedThisFrame) {
         // eslint-disable-next-line no-console
         console.log('[jump-debug] SPACE pressed but no jump applied', {
-          press: gameContext.spacePressSnapshot,
+          press: spacePressSnapshot,
           now: performance.now(),
-          grounded: gameContext.currPlayer.grounded,
-          wasGrounded: gameContext.currPlayer.wasGrounded,
-          lastGroundY: gameContext.lastGroundY,
-          ledgeGrace: gameContext.ledgeGrace,
-          jumpLock: gameContext.jumpLock,
-          coyoteTimer: gameContext.coyoteTimer,
-          jumpBuffer: gameContext.jumpBuffer,
-          vy: gameContext.currPlayer.vy,
-          y: gameContext.currPlayer.y,
+          grounded: currPlayer.grounded,
+          wasGrounded: currPlayer.wasGrounded,
+          lastGroundY,
+          ledgeGrace,
+          jumpLock,
+          coyoteTimer,
+          jumpBuffer,
+          vy: currPlayer.vy,
+          y: currPlayer.y,
           // additional diagnostics: contact samples and whether input still reports wasPressed
-          contactBack: gameContext.lastContactBack,
-          contactFront: gameContext.lastContactFront,
-          contactAvg: gameContext.lastContactAvg,
-          contactExists: gameContext.lastContactBack !== null && gameContext.lastContactFront !== null,
-          nearGround: gameContext.lastNearGround,
+          contactBack: lastContactBack,
+          contactFront: lastContactFront,
+          contactAvg: lastContactAvg,
+          contactExists: lastContactBack !== null && lastContactFront !== null,
+          nearGround: lastNearGround,
           inputWasPressedNow: input.get(' ').wasPressed,
         });
       }
       // clear per-frame transient input flags
       input.clearTransient();
       // reset snapshot and applied flag after handling
-      gameContext.spacePressSnapshot = null;
-      gameContext.jumpAppliedThisFrame = false;
+      spacePressSnapshot = null;
+      jumpAppliedThisFrame = false;
       rafId = requestAnimationFrame(loop);
     }
 

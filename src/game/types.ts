@@ -1,0 +1,84 @@
+import { Player } from '../player';
+import { ParallaxLayer } from '../parallax';
+import { AnimationStateMachine } from '../sprite';
+import EffectsManager from '../effects';
+
+export type GameState = 'title' | 'playing' | 'paused' | 'dead' | 'complete' | 'editor' | 'loading';
+
+export interface Camera {
+  x: number;
+}
+
+export interface EditorHandlers {
+  wheelHandler: (ev: WheelEvent) => void;
+  onPointerDownPan: (ev: PointerEvent) => void;
+  onPointerMovePan: (ev: PointerEvent) => void;
+  onPointerUpPan: (ev: PointerEvent) => void;
+  keydownHandler: (ev: KeyboardEvent) => void;
+}
+
+export interface GameContext {
+  state: GameState;
+  currentLevel: any;
+  currentLevelIndex: number;
+  
+  currPlayer: Player;
+  prevPlayer: Player;
+  currCam: Camera;
+  prevCam: Camera;
+
+  lastGroundY: number | null;
+  lastGroundAngle: number;
+  ledgeGrace: number;
+  
+  lastSlope: number;
+  lastSlopeEff: number;
+  lastAccelRaw: number;
+  lastAccelScaled: number;
+
+  landingFlash: number;
+  crashFade: number;
+  crashTimer: number;
+  restartHintTimer: number;
+  fps: number;
+
+  spacePressSnapshot: any;
+  jumpAppliedThisFrame: boolean;
+  lastContactBack: number | null;
+  lastContactFront: number | null;
+  lastContactAvg: number | null;
+  lastNearGround: boolean;
+  pendingImmediateJump: boolean;
+
+  lastNonEditorState: GameState;
+  editorStop: any | null;
+  editorCamX: number;
+  editorCamY: number;
+  editorZoom: number;
+  lastEditorZoom: number;
+
+  parallax: ParallaxLayer[];
+  effects: EffectsManager;
+  playerEntity: AnimationStateMachine | null;
+
+  sfxJump: any;
+  sfxLand: any;
+  sfxCheckpoint: any;
+  sfxDeath: any;
+  sfxComplete: any;
+
+  coyoteTimer: number;
+  jumpBuffer: number;
+  jumpHold: number;
+  jumpLock: number;
+
+  lastCheckpointX: number;
+  reachedFinish: boolean;
+  deathTimer: number;
+
+  snowPattern: CanvasPattern | null;
+  noisePattern: CanvasPattern | null;
+
+  accumulator: number;
+  lastTime: number;
+}
