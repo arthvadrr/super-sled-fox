@@ -102,7 +102,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     vctx.fillStyle = groundFill as string;
   }
 
-  const DEBUG_GAP_MARKERS = false; 
+  const DEBUG_GAP_MARKERS = false;
   let inChunk = false;
   let chunkFirstX = 0;
   let chunkLastX = 0;
@@ -193,10 +193,10 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
         }
         continue;
       }
-      const sx = isEditor ? wxToS(xi) : (xi - camOffsetX);
+      const sx = isEditor ? wxToS(xi) : xi - camOffsetX;
       // deterministic rough offset (sine-based) to avoid flicker
-      const off = (Math.sin(xi * 0.45) * amp1 + Math.sin(xi * 0.13) * amp2);
-      const sy = isEditor ? wyToS(hy + off) : (hy + shakeY + off);
+      const off = Math.sin(xi * 0.45) * amp1 + Math.sin(xi * 0.13) * amp2;
+      const sy = isEditor ? wyToS(hy + off) : hy + shakeY + off;
       if (!pathOpen) {
         vctx.moveTo(sx, sy);
         pathOpen = true;
@@ -221,10 +221,10 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
         }
         continue;
       }
-      const sx = isEditor ? wxToS(xi) : (xi - camOffsetX);
+      const sx = isEditor ? wxToS(xi) : xi - camOffsetX;
       // smaller smoother offset for glow
-      const off2 = (Math.sin(xi * 0.33) * (amp1 * 0.5) + Math.sin(xi * 0.11) * (amp2 * 0.5));
-      const sy = isEditor ? wyToS(hy + off2) : (hy + shakeY + off2);
+      const off2 = Math.sin(xi * 0.33) * (amp1 * 0.5) + Math.sin(xi * 0.11) * (amp2 * 0.5);
+      const sy = isEditor ? wyToS(hy + off2) : hy + shakeY + off2;
       if (!pathOpen) {
         vctx.moveTo(sx, sy);
         pathOpen = true;
@@ -235,7 +235,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     if (pathOpen) vctx.stroke();
 
     vctx.restore();
-  } catch (e) { }
+  } catch (e) {}
 
   // Draw objects
   const objects = currentLevel.objects || [];
@@ -288,12 +288,21 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
 
   if (playerEntity) {
     // draw so the sprite's bottom (feet) sits at the contact height
+    // Debug: once, log the draw descriptor so we can inspect the
+    // image source and frame sizes when debugging sprite issues in-game.
+    try {
+      const seen = (window as any).__playerSpriteLogged;
+      if (!seen && typeof (playerEntity as any).collectDrawDescriptors === 'function') {
+        const descs = (playerEntity as any).collectDrawDescriptors(0, FEET_OFFSET, { anchor: 'bottom', scale: zoom });
+        // eslint-disable-next-line no-console
+        console.log('[renderer] player draw descriptors:', descs);
+        (window as any).__playerSpriteLogged = true;
+      }
+    } catch (e) {}
     playerEntity.draw(vctx, 0, FEET_OFFSET, { anchor: 'bottom', scale: zoom });
   } else {
-    vctx.fillStyle = '#ff9900';
-    const pw = 16 * zoom;
-    const ph = 8 * zoom;
-    vctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+    // No sprite available: intentionally draw nothing instead of a placeholder
+    // square. This avoids visual clutter when the player sprite hasn't loaded.
   }
   vctx.restore();
 
@@ -309,7 +318,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   if (isEditor && (ctx as any).editorStop && typeof (ctx as any).editorStop.renderOverlay === 'function') {
     try {
       (ctx as any).editorStop.renderOverlay(vctx, leftWorld, topWorld, viewWorldW, viewWorldH);
-    } catch (e) { }
+    } catch (e) {}
   }
 
   // Draw UI / Overlays
