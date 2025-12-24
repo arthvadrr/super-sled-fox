@@ -1,13 +1,18 @@
 import React, { useRef, useEffect } from 'react';
 import InputManager from './input';
 import { createPlayer, Player, PHYS, PLAYER_DEFAULTS } from './player';
-import sampleLevel from './levels/sample-level';
+import { LEVELS } from './levels';
+
+// runtime mutable level loaded from the LEVELS pack
+let currentLevelIndex = 0;
+let currentLevel = JSON.parse(JSON.stringify(LEVELS[currentLevelIndex].level));
 import assetManager from './assetManager';
 import audioManager from './audioManager';
 import { createSpriteSheet, AnimatedSprite, AnimationStateMachine } from './sprite';
 import { loadParallaxLayers, ParallaxLayer } from './parallax';
 import EffectsManager from './effects';
 import { getHeightAtX, getSlopeAtX } from './heightmap';
+import { validateLevel } from './level';
 import { startEditor } from './editor';
 
 const VIRTUAL_WIDTH = 400;
@@ -34,7 +39,7 @@ export default function Game() {
 
     async function loadLevelAssets() {
       try {
-        const meta: any = sampleLevel.meta || {};
+        const meta: any = currentLevel.meta || {};
         const assets = meta.assets || [];
         if (!Array.isArray(assets) || assets.length === 0) {
           // no explicit assets: wait a small timeout so UI shows loading briefly
@@ -125,6 +130,29 @@ export default function Game() {
       if (!loadingCancelled) stateRef.current = 'title';
     });
 
+    // helper to load a level by pack index at runtime
+    async function loadLevelByIndex(idx: number) {
+      if (idx < 0 || idx >= LEVELS.length) return;
+      currentLevelIndex = idx;
+      currentLevel = JSON.parse(JSON.stringify(LEVELS[idx].level));
+      // clear runtime assets/visuals that are level-specific
+      parallax.length = 0;
+      // reset checkpoint/start state for new level
+      try {
+        const startObjNew = (currentLevel.objects || []).find((o: any) => o.type === 'start');
+        lastCheckpointX = startObjNew ? startObjNew.x : PLAYER_DEFAULTS.startX;
+        reachedFinish = false;
+      } catch (e) {
+        // ignore
+      }
+      // attempt to load assets for the new level
+      await loadLevelAssets();
+      // respawn player at start/checkpoint of new level
+      respawn();
+      // briefly show restart hint so player knows R will restart
+      restartHintTimer = 2.5;
+    }
+
     // Audio unlock gate: unlock audio on first user gesture
     const unlockOnce = () => {
       audioManager.unlock().catch(() => { });
@@ -179,6 +207,8 @@ export default function Game() {
     // crash / respawn visuals
     let crashFade = 0; // seconds of crash fade overlay (counts down)
     let crashTimer = 0; // time until auto-respawn after crash
+    // transient UI hint shown briefly after starting a new level
+    let restartHintTimer = 0;
     let fps = 60;
     // editor state tracking
     let lastNonEditorState: GameState = stateRef.current;
@@ -213,7 +243,7 @@ export default function Game() {
     let jumpHold = 0;
     let jumpLock = 0; // short timer to prevent immediate re-grounding after jump
     // checkpoint / finish / death
-    const startObj = (sampleLevel.objects || []).find((o) => o.type === 'start');
+    const startObj = (currentLevel.objects || []).find((o: any) => o.type === 'start');
     let lastCheckpointX = startObj ? startObj.x : currPlayer.x;
     let reachedFinish = false;
     let deathTimer = 0; // delay before auto-respawn
@@ -223,13 +253,13 @@ export default function Game() {
     function respawn() {
       const rx = lastCheckpointX ?? PLAYER_DEFAULTS.startX;
       currPlayer.x = rx;
-      const hy = getHeightAtX(sampleLevel as any, rx);
+      const hy = getHeightAtX(currentLevel as any, rx);
       // place player slightly above ground so feet sit on the surface rather than inside it
       const FEET_OFFSET = 8; // virtual pixels from contact height to player's origin
       currPlayer.y = hy !== null ? hy - FEET_OFFSET : PLAYER_DEFAULTS.startY;
       currPlayer.vx = PHYS.BASE_CRUISE_SPEED;
       currPlayer.vy = 0;
-      currPlayer.angle = getSlopeAtX(sampleLevel as any, rx) ?? 0;
+      currPlayer.angle = getSlopeAtX(currentLevel as any, rx) ?? 0;
       // start slightly above ground and mark airborne so we don't snap into the ground
       currPlayer.grounded = false;
       currPlayer.wasGrounded = false;
@@ -271,8 +301,8 @@ export default function Game() {
       // respawn
       // decay jump lock
       jumpLock = Math.max(0, jumpLock - dt);
-      const hb = getHeightAtX(sampleLevel as any, backX);
-      const hf = getHeightAtX(sampleLevel as any, frontX);
+      const hb = getHeightAtX(currentLevel as any, backX);
+      const hf = getHeightAtX(currentLevel as any, frontX);
 
       currPlayer.wasGrounded = currPlayer.grounded;
 
@@ -298,7 +328,7 @@ export default function Game() {
         // grounded branch
 
         // grounded motion: acceleration along slope from gravity projection
-        const slope = getSlopeAtX(sampleLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
+        const slope = getSlopeAtX(currentLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
         lastSlope = slope;
         // clamp slope for safety and compute gravity projection
         const slopeEff = Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, slope));
@@ -476,7 +506,7 @@ export default function Game() {
       }
 
       // check checkpoints / finish after movement
-      for (const obj of sampleLevel.objects || []) {
+      for (const obj of currentLevel.objects || []) {
         if (obj.type === 'checkpoint') {
           if (currPlayer.x >= obj.x && lastCheckpointX < obj.x) {
             lastCheckpointX = obj.x;
@@ -515,7 +545,7 @@ export default function Game() {
       }
 
       // camera follows player with look-ahead and smoothing, clamped to level bounds
-      const levelWidth = (sampleLevel.meta && sampleLevel.meta.width) || (sampleLevel.segments && sampleLevel.segments.length) || VIRTUAL_WIDTH;
+      const levelWidth = (currentLevel.meta && currentLevel.meta.width) || (currentLevel.segments && currentLevel.segments.length) || VIRTUAL_WIDTH;
       const look = Math.max(-CAMERA.MAX_LOOK_AHEAD, Math.min(CAMERA.MAX_LOOK_AHEAD, currPlayer.vx * CAMERA.LOOK_AHEAD_MULT));
       const targetCamX = currPlayer.x + look;
       // smooth toward target (frame-rate independent)
@@ -591,7 +621,7 @@ export default function Game() {
       // compute visible segment range for culling (zoom-aware)
       const rightWorld = camXUsed + viewWorldW / 2;
       const leftIdx = Math.max(0, Math.floor(leftWorld) - RENDER.PADDING);
-      const rightIdx = Math.min((sampleLevel.segments && sampleLevel.segments.length - 1) || 0, Math.ceil(rightWorld) + RENDER.PADDING);
+      const rightIdx = Math.min((currentLevel.segments && currentLevel.segments.length - 1) || 0, Math.ceil(rightWorld) + RENDER.PADDING);
 
       // draw terrain (filled polygon) only in visible range
       // Draw each continuous ground chunk separately so gaps (null heights) remain empty.
@@ -602,7 +632,7 @@ export default function Game() {
       let chunkLastX = 0; // world x of last sample in chunk
       for (let xi = leftIdx; xi <= rightIdx; xi++) {
         const sx = isEditor ? wxToS(xi) : (xi - camOffsetX);
-        const hy = getHeightAtX(sampleLevel as any, xi);
+        const hy = getHeightAtX(currentLevel as any, xi);
         if (hy === null) {
           if (DEBUG_GAP_MARKERS) {
             // small red marker at top to confirm sampler returned null here
@@ -624,13 +654,13 @@ export default function Game() {
             vctx.strokeStyle = 'rgba(0,0,0,0.25)';
             vctx.lineWidth = 1;
             {
-              const h0 = getHeightAtX(sampleLevel as any, chunkFirstX) as number;
+              const h0 = getHeightAtX(currentLevel as any, chunkFirstX) as number;
               const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
               const sy0 = isEditor ? wyToS(h0) : h0;
               vctx.moveTo(sx0, sy0);
             }
             for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
-              const hy_i = getHeightAtX(sampleLevel as any, sx_i);
+              const hy_i = getHeightAtX(currentLevel as any, sx_i);
               if (hy_i === null) break;
               const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
               const syp = isEditor ? wyToS(hy_i) : hy_i;
@@ -670,13 +700,13 @@ export default function Game() {
         vctx.strokeStyle = 'rgba(0,0,0,0.25)';
         vctx.lineWidth = 1;
         {
-          const h0 = getHeightAtX(sampleLevel as any, chunkFirstX) as number;
+          const h0 = getHeightAtX(currentLevel as any, chunkFirstX) as number;
           const sx0 = isEditor ? wxToS(chunkFirstX) : (chunkFirstX - camOffsetX);
           const sy0 = isEditor ? wyToS(h0) : h0;
           vctx.moveTo(sx0, sy0);
         }
         for (let sx_i = chunkFirstX + 1; sx_i <= chunkLastX; sx_i++) {
-          const hy_i = getHeightAtX(sampleLevel as any, sx_i);
+          const hy_i = getHeightAtX(currentLevel as any, sx_i);
           if (hy_i === null) break;
           const sxp = isEditor ? wxToS(sx_i) : (sx_i - camOffsetX);
           const syp = isEditor ? wyToS(hy_i) : hy_i;
@@ -687,10 +717,10 @@ export default function Game() {
       }
 
       // draw level objects (start/checkpoint/finish) culling to visible range
-      for (const obj of sampleLevel.objects || []) {
+      for (const obj of currentLevel.objects || []) {
         if (obj.x < leftIdx - 1 || obj.x > rightIdx + 1) continue;
         const hx = isEditor ? wxToS(obj.x) : (obj.x - camOffsetX);
-        const hyWorld = getHeightAtX(sampleLevel as any, obj.x);
+        const hyWorld = getHeightAtX(currentLevel as any, obj.x);
         const hy = hyWorld !== null ? (isEditor ? wyToS(hyWorld) : hyWorld) : (VIRTUAL_HEIGHT / 2);
         if (obj.type === 'start') {
           vctx.fillStyle = '#ffd700';
@@ -838,14 +868,21 @@ export default function Game() {
         vctx.fillText('Press R to Respawn', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 + 18);
         vctx.textAlign = 'left';
       } else if (stateRef.current === 'complete') {
+        const isLastLevel = currentLevelIndex + 1 >= LEVELS.length;
         vctx.fillStyle = 'rgba(0,0,0,0.85)';
         vctx.fillRect(0, VIRTUAL_HEIGHT / 2 - 64, VIRTUAL_WIDTH, 128);
         vctx.fillStyle = '#fff';
         vctx.font = '26px monospace';
         vctx.textAlign = 'center';
-        vctx.fillText('Level Complete', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 - 4);
-        vctx.font = '14px monospace';
-        vctx.fillText('Press R to Restart', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 + 22);
+        if (isLastLevel) {
+          vctx.fillText('You Beat The Game — Thanks!', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 - 4);
+          vctx.font = '14px monospace';
+          vctx.fillText('Press R to Restart', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 + 22);
+        } else {
+          vctx.fillText('Level Complete — Well done!', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 - 4);
+          vctx.font = '14px monospace';
+          vctx.fillText('Press SPACE to Continue', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 + 22);
+        }
         vctx.textAlign = 'left';
       }
 
@@ -858,6 +895,23 @@ export default function Game() {
         vctx.textAlign = 'center';
         vctx.fillText('Loading...', VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT / 2 + 6);
         vctx.textAlign = 'left';
+      }
+
+      // transient restart hint (shows briefly after starting a new level)
+      if (restartHintTimer > 0) {
+        vctx.save();
+        const alpha = Math.min(1, restartHintTimer / 2.5);
+        vctx.globalAlpha = alpha;
+        vctx.fillStyle = 'rgba(0,0,0,0.8)';
+        const bw = 220;
+        const bh = 20;
+        vctx.fillRect(VIRTUAL_WIDTH / 2 - bw / 2, 8, bw, bh);
+        vctx.fillStyle = '#fff';
+        vctx.font = '12px monospace';
+        vctx.textAlign = 'center';
+        vctx.fillText('Press R to Restart', VIRTUAL_WIDTH / 2, 8 + 14);
+        vctx.textAlign = 'left';
+        vctx.restore();
       }
 
       // Editor mode indicator (visible only when in editor state)
@@ -956,6 +1010,8 @@ export default function Game() {
       if (delta > 0) fps += (1 / delta - fps) * 0.08;
       // decay landing flash timer
       landingFlash = Math.max(0, landingFlash - delta);
+      // decay transient restart hint timer
+      restartHintTimer = Math.max(0, (restartHintTimer || 0) - delta);
       // handle crash/death timers (fade only) even when not playing
       if (stateRef.current === 'dead') {
         if (crashTimer > 0) {
@@ -991,6 +1047,23 @@ export default function Game() {
       if (stateRef.current === 'title' && startPressed) {
         respawn();
         stateRef.current = 'playing';
+      }
+
+      // continue to next level from complete when SPACE pressed
+      if (stateRef.current === 'complete' && startPressed) {
+        const nextIdx = currentLevelIndex + 1;
+        if (nextIdx < LEVELS.length) {
+          // show loading state while switching levels
+          stateRef.current = 'loading';
+          loadLevelByIndex(nextIdx).then(() => {
+            // only resume play if still in loading state
+            if (stateRef.current === 'loading') stateRef.current = 'playing';
+          });
+        } else {
+          // no next level: restart current level
+          respawn();
+          stateRef.current = 'playing';
+        }
       }
 
       // toggle editor state when compile-time enabled
@@ -1041,11 +1114,119 @@ export default function Game() {
                 editorStop = startEditor({
                   canvas: canvasElInner,
                   screenToWorld: screenToWorldFn,
-                  level: sampleLevel as any,
+                  level: currentLevel as any,
                   onChange() {
                     // noop for now; could mark level dirty
                   },
                 });
+
+                // Export / Import UI (only present while editor active)
+                const exportBtn = document.createElement('button');
+                exportBtn.textContent = 'Export Level';
+                exportBtn.style.position = 'fixed';
+                exportBtn.style.right = '12px';
+                exportBtn.style.bottom = '12px';
+                exportBtn.style.zIndex = '9999';
+                exportBtn.style.padding = '6px 8px';
+                exportBtn.style.background = '#222';
+                exportBtn.style.color = '#ffd700';
+                document.body.appendChild(exportBtn);
+
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'application/json';
+                fileInput.style.display = 'none';
+                document.body.appendChild(fileInput);
+
+                const importBtn = document.createElement('button');
+                importBtn.textContent = 'Import Level';
+                importBtn.style.position = 'fixed';
+                importBtn.style.right = '120px';
+                importBtn.style.bottom = '12px';
+                importBtn.style.zIndex = '9999';
+                importBtn.style.padding = '6px 8px';
+                importBtn.style.background = '#222';
+                importBtn.style.color = '#fff';
+                document.body.appendChild(importBtn);
+
+                const showError = (msg: string) => {
+                  const el = document.createElement('div');
+                  el.textContent = msg;
+                  el.style.position = 'fixed';
+                  el.style.left = '12px';
+                  el.style.bottom = '12px';
+                  el.style.background = 'rgba(0,0,0,0.8)';
+                  el.style.color = '#fff';
+                  el.style.padding = '8px 12px';
+                  el.style.zIndex = '9999';
+                  document.body.appendChild(el);
+                  setTimeout(() => el.remove(), 4000);
+                };
+
+                exportBtn.addEventListener('click', () => {
+                  try {
+                    const dataStr = JSON.stringify(currentLevel, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = (currentLevel.meta && currentLevel.meta.title ? currentLevel.meta.title.replace(/[^a-z0-9]/gi, '_') : 'level') + '.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  } catch (e) {
+                    showError('Export failed');
+                  }
+                });
+
+                importBtn.addEventListener('click', () => fileInput.click());
+                fileInput.addEventListener('change', (ev) => {
+                  const f = (ev.target as HTMLInputElement).files?.[0];
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    try {
+                      const parsed = JSON.parse(String(reader.result));
+                      // TODO: migrateLevel if needed (not implemented yet)
+                      const v = validateLevel(parsed as any);
+                      if (!v.ok) { showError('Invalid level: ' + v.reason); return; }
+                      // accept and replace current level
+                      Object.assign(currentLevel, parsed);
+                      showError('Level imported');
+                    } catch (e) {
+                      showError('Import failed');
+                    }
+                  };
+                  reader.readAsText(f);
+                });
+
+                // drag & drop support
+                const onDrop = (ev: DragEvent) => {
+                  if (stateRef.current !== 'editor') return;
+                  ev.preventDefault();
+                  const f = ev.dataTransfer?.files?.[0];
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    try {
+                      const parsed = JSON.parse(String(reader.result));
+                      const v = validateLevel(parsed as any);
+                      if (!v.ok) { showError('Invalid level: ' + v.reason); return; }
+                      Object.assign(currentLevel, parsed);
+                      showError('Level imported');
+                    } catch (e) {
+                      showError('Import failed');
+                    }
+                  };
+                  reader.readAsText(f);
+                };
+                const onDragOver = (ev: DragEvent) => { if (stateRef.current === 'editor') ev.preventDefault(); };
+                window.addEventListener('drop', onDrop);
+                window.addEventListener('dragover', onDragOver);
+
+                // attach to editor handlers for cleanup
+                (editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -1149,6 +1330,16 @@ export default function Game() {
                     window.removeEventListener('pointermove', h.onPointerMovePan);
                     window.removeEventListener('pointerup', h.onPointerUpPan);
                     if (h.keydownHandler) window.removeEventListener('keydown', h.keydownHandler);
+                  }
+                } catch (e) { }
+                try {
+                  const nodes = (editorStop as any).__exportImportNodes;
+                  if (nodes) {
+                    try { nodes.exportBtn.remove(); } catch (e) { }
+                    try { nodes.importBtn.remove(); } catch (e) { }
+                    try { nodes.fileInput.remove(); } catch (e) { }
+                    try { window.removeEventListener('drop', nodes.onDrop); } catch (e) { }
+                    try { window.removeEventListener('dragover', nodes.onDragOver); } catch (e) { }
                   }
                 } catch (e) { }
                 try { editorStop(); } catch (e) { }
