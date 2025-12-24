@@ -35,6 +35,29 @@ export class ParticleSystem {
     }
   }
 
+  emitDirectional(x: number, y: number, count = 6, opts: { angle?: number; spread?: number; speed?: number; size?: number; color?: string } = {}) {
+    if (!this.enabled) return;
+    const angleBase = opts.angle ?? (Math.PI * 0.5); // default up
+    const spread = opts.spread ?? 0.9; // radians
+    const speed = opts.speed ?? 60;
+    const size = opts.size ?? 2.5;
+    const color = opts.color ?? '#ddd';
+    for (let i = 0; i < count; i++) {
+      const ang = angleBase + (Math.random() - 0.5) * spread;
+      const s = speed * (0.4 + Math.random() * 0.8);
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(ang) * s + (Math.random() - 0.5) * 6,
+        vy: Math.sin(ang) * s + (Math.random() - 0.5) * 4,
+        ttl: 0.4 + Math.random() * 0.6,
+        age: 0,
+        size: size * (0.6 + Math.random() * 0.9),
+        color,
+      });
+    }
+  }
+
   emitSpeedLines(x: number, y: number, count = 3, opts: { vx?: number; color?: string } = {}) {
     if (!this.enabled) return;
     const baseV = Math.abs(opts.vx ?? 0);
@@ -146,6 +169,19 @@ export class EffectsManager {
     if (Math.abs(vx) < 120) return;
     const n = Math.min(4, Math.floor(Math.abs(vx) / 80));
     this.particles.emitSpeedLines(x + (vx > 0 ? -8 : 8), y - 6, n, { vx, color: 'rgba(255,255,255,0.9)' });
+  }
+
+  onBoost(x: number, y: number, vx: number) {
+    if (!this.enabled) return;
+    // flame: small fast particles pointing backwards relative to vx
+    const dir = vx >= 0 ? -1 : 1;
+    const angleBase = dir < 0 ? Math.PI : 0; // left or right
+    // Emit a few flame sparks
+    this.particles.emitDirectional(x + dir * 10, y - 4, 6, { angle: angleBase, spread: 0.8, speed: 140, size: 1.6, color: '#ffb86b' });
+    // Emit smoke: slower, larger, drifting upward/back
+    this.particles.emitDirectional(x + dir * 6, y - 2, 4, { angle: angleBase + -0.6, spread: 1.0, speed: 36, size: 3.2, color: 'rgba(120,120,120,0.85)' });
+    // small speed lines for extra visual feedback
+    this.particles.emitSpeedLines(x + (vx > 0 ? -8 : 8), y - 6, 2, { vx, color: 'rgba(255,200,120,0.95)' });
   }
 }
 

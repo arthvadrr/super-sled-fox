@@ -18,7 +18,9 @@ export function startEditor(opts: StartOpts) {
     return clamp(Math.floor(wx / segmentLen), 0, level.segments.length - 1);
   }
   function worldYToHeight(wy: number) {
-    return clamp(Math.round(wy), 0, virtualHeight);
+    const metaVH = (level.meta && (level.meta as any).virtualHeight) as number | undefined;
+    const vh = typeof metaVH === 'number' ? metaVH : virtualHeight;
+    return clamp(Math.round(wy), 0, vh);
   }
 
   // Tools
@@ -245,6 +247,11 @@ export function startEditor(opts: StartOpts) {
     lastGapIndex = null;
     gapDragAction = null;
     scheduleOnChange();
+    // Auto-smooth small jaggedness after a paint operation so tiny bumps
+    // don't create micro-uphill events that bleed speed.
+    if (currentTool === Tool.PaintHeight) {
+      smoothSegments(1);
+    }
   }
 
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -287,6 +294,32 @@ export function startEditor(opts: StartOpts) {
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('pointercancel', onPointerUp);
     window.removeEventListener('keydown', onKeyDown as any);
+  }
+
+  // Smooth the `level.segments` array in-place using a simple moving average
+  // over a radius (in segments). Null (gaps) are preserved.
+  function smoothSegments(radius: number = 1) {
+    if (!level || !Array.isArray(level.segments)) return;
+    const old = level.segments.slice();
+    const n = old.length;
+    const out: (number | null)[] = old.slice();
+    for (let i = 0; i < n; i++) {
+      if (old[i] === null) continue; // preserve gaps
+      let sum = 0;
+      let count = 0;
+      const a = Math.max(0, i - radius);
+      const b = Math.min(n - 1, i + radius);
+      for (let j = a; j <= b; j++) {
+        const v = old[j];
+        if (v !== null && typeof v === 'number') {
+          sum += v as number;
+          count++;
+        }
+      }
+      if (count > 0) out[i] = Math.round(sum / count);
+    }
+    level.segments = out;
+    scheduleOnChange();
   }
 
   (stop as any).renderOverlay = function (vctx: CanvasRenderingContext2D, leftWorld: number, topWorld: number, viewW: number, viewH: number) {
@@ -418,6 +451,9 @@ export function startEditor(opts: StartOpts) {
     vctx.restore();
     vctx.restore();
   };
+
+  // expose smoothing function on the returned stop so external UI can trigger it
+  (stop as any).smoothSegments = smoothSegments;
 
   return stop;
 }

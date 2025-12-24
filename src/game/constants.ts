@@ -2,9 +2,10 @@ export const VIRTUAL_WIDTH = 400;
 export const VIRTUAL_HEIGHT = 225;
 
 export const PHYS_CONSTANTS = {
-  SLOPE_SCALE: 0.35,
-  MAX_SLOPE: 1.5,
-  MOTOR_K: 6,
+  SLOPE_DOWN_SCALE: 0.8,
+  SLOPE_UP_SCALE: 0.8,
+  MAX_SLOPE: 2, // max slope (dy/dx) that affects speed
+  MOTOR_K: 6, // motor torque constant
   MOTOR_MAX: 250,
   FEET_OFFSET: 8,
   HALF_WIDTH: 8,

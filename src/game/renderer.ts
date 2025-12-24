@@ -38,11 +38,12 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   const ix = prevPlayer.x * (1 - alpha) + currPlayer.x * alpha;
   const iy = prevPlayer.y * (1 - alpha) + currPlayer.y * alpha;
   const camx = prevCam.x * (1 - alpha) + currCam.x * alpha;
+  const camy = (prevCam.y || 0) * (1 - alpha) + (currCam.y || 0) * alpha;
 
   // Editor camera uses the same coordinate convention as screenToWorldFn:
   // camX/camY represent the CENTER of the view in world units.
   const camXUsed = isEditor ? editorCamX : camx;
-  const camYUsed = isEditor ? editorCamY : 0;
+  const camYUsed = isEditor ? editorCamY : camy;
   const viewWorldW = VIRTUAL_WIDTH / Math.max(0.0001, zoom);
   const viewWorldH = VIRTUAL_HEIGHT / Math.max(0.0001, zoom);
   const leftWorld = camXUsed - viewWorldW / 2;
@@ -81,6 +82,8 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   // compute camera offset used by gameplay-only helpers (effects). World rendering in editor mode uses wxToS/wyToS.
   let camOffsetX = camxShaken - VIRTUAL_WIDTH / 2;
   if (!isEditor && PIXEL_SNAP) camOffsetX = Math.round(camOffsetX);
+  let camOffsetY = camy - VIRTUAL_HEIGHT / 2;
+  if (!isEditor && PIXEL_SNAP) camOffsetY = Math.round(camOffsetY);
 
   // compute visible segment range for culling (zoom-aware)
   const rightWorld = camXUsed + viewWorldW / 2;
@@ -136,7 +139,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       }
       continue;
     }
-    const sy = isEditor ? wyToS(hy) : hy + shakeY;
+    const sy = isEditor ? wyToS(hy) : hy - camOffsetY + shakeY;
     if (!inChunk) {
       vctx.beginPath();
       vctx.moveTo(sx, sy);
@@ -196,7 +199,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       const sx = isEditor ? wxToS(xi) : xi - camOffsetX;
       // deterministic rough offset (sine-based) to avoid flicker
       const off = Math.sin(xi * 0.45) * amp1 + Math.sin(xi * 0.13) * amp2;
-      const sy = isEditor ? wyToS(hy + off) : hy + shakeY + off;
+      const sy = isEditor ? wyToS(hy + off) : hy - camOffsetY + shakeY + off;
       if (!pathOpen) {
         vctx.moveTo(sx, sy);
         pathOpen = true;
@@ -224,7 +227,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       const sx = isEditor ? wxToS(xi) : xi - camOffsetX;
       // smaller smoother offset for glow
       const off2 = Math.sin(xi * 0.33) * (amp1 * 0.5) + Math.sin(xi * 0.11) * (amp2 * 0.5);
-      const sy = isEditor ? wyToS(hy + off2) : hy + shakeY + off2;
+      const sy = isEditor ? wyToS(hy + off2) : hy - camOffsetY + shakeY + off2;
       if (!pathOpen) {
         vctx.moveTo(sx, sy);
         pathOpen = true;
@@ -241,7 +244,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   const objects = currentLevel.objects || [];
   for (const obj of objects) {
     const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
-    const sy = isEditor ? wyToS(obj.y) : obj.y + shakeY;
+    const sy = isEditor ? wyToS(obj.y) : obj.y - camOffsetY + shakeY;
     const radius = (obj.radius || 12) * zoom;
     if (sx < -radius || sx > VIRTUAL_WIDTH + radius) continue;
 
@@ -280,7 +283,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   // Draw player
   vctx.save();
   const psx = isEditor ? wxToS(ix) : ix - camOffsetX;
-  const psy = isEditor ? wyToS(iy) : iy + shakeY;
+  const psy = isEditor ? wyToS(iy) : iy - camOffsetY + shakeY;
   vctx.translate(psx, psy);
   vctx.rotate(currPlayer.angle);
   // FEET_OFFSET: pixels from contact height to player's origin (matches simulation/respawn)
@@ -309,7 +312,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   // Draw effects
   vctx.save();
   if (!isEditor) {
-    vctx.translate(-camOffsetX, shakeY);
+    vctx.translate(-camOffsetX, -camOffsetY + shakeY);
     effects.draw(vctx);
   }
   vctx.restore();
@@ -383,6 +386,22 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.textAlign = 'right';
       vctx.fillText('PRESS R TO RESTART LEVEL', VIRTUAL_WIDTH - 8, VIRTUAL_HEIGHT - 8);
     }
+
+    // Small controls hint at bottom center
+    try {
+      const hintText = 'JUMP: Spacebar  BRAKE: Left Arrow or A  BOOST: Hold Right Arrow or D';
+      vctx.font = '8px sans-serif';
+      vctx.textAlign = 'center';
+      vctx.fillStyle = 'rgba(0,0,0,0.45)';
+      // subtle background bar for readability
+      const padH = 6;
+      const hintW = vctx.measureText(hintText).width + 18;
+      const hintX = VIRTUAL_WIDTH / 2 - hintW / 2;
+      const hintY = VIRTUAL_HEIGHT - 18 - padH / 2;
+      vctx.fillRect(hintX, hintY, hintW, padH + 6);
+      vctx.fillStyle = 'rgba(255,255,255,0.92)';
+      vctx.fillText(hintText, VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 12);
+    } catch (e) {}
   }
 
   if (noisePattern) {

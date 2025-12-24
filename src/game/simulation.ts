@@ -4,11 +4,25 @@ import { getHeightAtX, getSlopeAtX } from '../heightmap';
 import { PHYS } from '../player';
 import { InputManager } from '../input';
 
-const { SLOPE_SCALE, MAX_SLOPE, MOTOR_K, MOTOR_MAX, HALF_WIDTH } = PHYS_CONSTANTS;
+const { SLOPE_DOWN_SCALE, SLOPE_UP_SCALE, MAX_SLOPE, MOTOR_K, MOTOR_MAX, HALF_WIDTH } = PHYS_CONSTANTS;
 const { COYOTE_TIME, BUFFER_TIME, HOLD_GRAVITY_FACTOR } = JUMP_SETTINGS;
 
 export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   const { currPlayer, currentLevel } = ctx;
+
+  // Log input state changes for 'a' and ArrowLeft to debug missing logs.
+  try {
+    const aDown = input.get('a').isDown;
+    const leftDown = input.get('ArrowLeft').isDown;
+    const dDown = input.get('d').isDown;
+    const rightDown = input.get('ArrowRight').isDown;
+    const prev = (window as any).__lastKeyDownStates || { a: false, left: false, d: false, right: false };
+    if (aDown !== prev.a || leftDown !== prev.left || dDown !== prev.d || rightDown !== prev.right) {
+      (window as any).__lastKeyDownStates = { a: aDown, left: leftDown, d: dDown, right: rightDown };
+      // eslint-disable-next-line no-console
+      console.log('[input-change] a:', aDown, 'ArrowLeft:', leftDown, 'd:', dDown, 'ArrowRight:', rightDown, 'grounded:', currPlayer.grounded);
+    }
+  } catch (e) {}
 
   // two-point ground contact positions
   const backX = currPlayer.x - HALF_WIDTH;
@@ -71,22 +85,26 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     currPlayer.grounded = true;
     currPlayer.angle = Math.atan2((hf as number) - (hb as number), frontX - backX);
 
+    // input speed modifiers and braking — read input early so we can respect braking intent
+    const forward = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
+    const back = input.get('ArrowLeft').isDown || input.get('a').isDown || input.get('s').isDown;
+    let speedMul = 1.0;
+    if (forward) speedMul = 1.5;
+    else if (back) speedMul = 0.5;
+
     // grounded motion: acceleration along slope from gravity projection
     const slope = getSlopeAtX(currentLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
     ctx.lastSlope = slope;
     const slopeEff = Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, slope));
     ctx.lastSlopeEff = slopeEff;
     const accelRaw = (PHYS.GRAVITY * slopeEff) / Math.sqrt(1 + slopeEff * slopeEff);
-    const accelScaled = accelRaw * SLOPE_SCALE;
+    // use different scales for downhill vs uphill: when accelRaw is positive use downhill scale
+    const scale = accelRaw >= 0 ? SLOPE_DOWN_SCALE : SLOPE_UP_SCALE;
+    let accelScaled = accelRaw * scale;
+    // If player is actively holding 'back' (braking), prevent slope from accelerating them forward.
+    if (back && accelScaled > 0) accelScaled = 0;
     ctx.lastAccelRaw = accelRaw;
     ctx.lastAccelScaled = accelScaled;
-
-    // input speed modifiers and braking
-    const forward = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
-    const back = input.get('ArrowLeft').isDown || input.get('a').isDown || input.get('s').isDown;
-    let speedMul = 1.0;
-    if (forward) speedMul = 1.5;
-    else if (back) speedMul = 0.5;
 
     // target cruise speed modified by input
     const targetSpeed = PHYS.BASE_CRUISE_SPEED * speedMul;
@@ -95,45 +113,185 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     let motorAccel = 0;
     if (forward && !back) {
       motorAccel = Math.max(0, Math.min(MOTOR_MAX, (targetSpeed - currPlayer.vx) * MOTOR_K));
+      // Log if forward is pressed but motorAssist produces zero or tiny applied acceleration
+      try {
+        const now = performance.now();
+        const lastFwdLog = (window as any).__lastFwdAssistLog || 0;
+        if (now - lastFwdLog > 250) {
+          (window as any).__lastFwdAssistLog = now;
+          // eslint-disable-next-line no-console
+          console.log('[debug][fwd-assist] motorAccel', Math.round(motorAccel), 'vx', Math.round(currPlayer.vx), 'target', Math.round(targetSpeed));
+        }
+      } catch (e) {}
     }
 
     // apply slope gravity (scaled)
+    const preVx = currPlayer.vx;
     currPlayer.vx += accelScaled * dt;
     // apply motor assist but do not exceed targetSpeed
     if (motorAccel > 0) {
       const maxDelta = Math.max(0, targetSpeed - currPlayer.vx);
       const applied = Math.min(motorAccel * dt, maxDelta);
       currPlayer.vx += applied;
+      // If applied is zero while targetSpeed > currPlayer.vx, log for diagnosis.
+      try {
+        if (applied <= 0 && targetSpeed > currPlayer.vx + 0.001) {
+          // eslint-disable-next-line no-console
+          console.warn('[debug][fwd-applied-zero] applied=0 but target>vx', {
+            targetSpeed: Math.round(targetSpeed),
+            vx: Math.round(currPlayer.vx),
+            motorAccel: Math.round(motorAccel),
+            maxDelta: Math.round(maxDelta),
+          });
+        }
+      } catch (e) {}
     }
 
-    // braking only for back: if back pressed and vx > target, decelerate; never reverse to negative
+    // If forward is held, provide a modest manual thrust only when the player
+    // is below the target plus a small hysteresis. This prevents small continuous
+    // thrusts when downhill carries the player above target speed and avoids
+    // oscillation between nearby slopes.
+    if (forward && !back && currPlayer.vx < targetSpeed + 40) {
+      const thrust = PHYS.FORWARD_THRUST * dt;
+      currPlayer.vx += thrust;
+      try {
+        const now = performance.now();
+        const last = (window as any).__lastFwdThrustLog || 0;
+        if (now - last > 250) {
+          (window as any).__lastFwdThrustLog = now;
+          // eslint-disable-next-line no-console
+          console.log('[debug][fwd-thrust] thrust', Math.round(thrust), 'vx', Math.round(currPlayer.vx));
+        }
+      } catch (e) {}
+    }
+
+    // Debugging/logging for 'a' press runaway: throttle logs to avoid spam.
+    try {
+      const aDown = input.get('a').isDown;
+      const postVx = currPlayer.vx;
+      const deltaV = postVx - preVx;
+      const now = performance.now();
+      const last = (window as any).__lastInsaneALogTime || 0;
+      const shouldLog = aDown && (deltaV > 20 || postVx > 2000);
+      if (shouldLog && now - last > 1000) {
+        (window as any).__lastInsaneALogTime = now;
+        // eslint-disable-next-line no-console
+        console.warn('[debug][a-press] suspicious vx change while holding a', {
+          preVx: Math.round(preVx),
+          postVx: Math.round(postVx),
+          delta: Math.round(deltaV),
+          forward,
+          back,
+          slopeEff,
+          accelRaw: Math.round(accelRaw),
+          accelScaled: Math.round(accelScaled),
+          motorAccel,
+          targetSpeed,
+          dt,
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // braking: when back is held, reduce speed magnitude toward zero (never reverse direction)
     if (back) {
-      if (currPlayer.vx > targetSpeed) {
-        currPlayer.vx = Math.max(targetSpeed, currPlayer.vx - PHYS.FRICTION * 4 * dt);
+      const brakeDecel = PHYS.BRAKE_DECEL || 1200;
+      if (currPlayer.vx > 0) {
+        currPlayer.vx = Math.max(0, currPlayer.vx - brakeDecel * dt);
+      } else if (currPlayer.vx < 0) {
+        currPlayer.vx = Math.min(0, currPlayer.vx + brakeDecel * dt);
       }
     } else {
       // accelerate toward target smoothly
-      const accel = 200; // px/s^2 accel toward target
+      const accel = 120; // px/s^2 accel toward target (reduced for gentler acceleration)
       const delta = targetSpeed - currPlayer.vx;
       const change = Math.sign(delta) * Math.min(Math.abs(delta), accel * dt);
       currPlayer.vx += change;
     }
 
-    // simple friction along ground (always apply small friction)
-    const frictionAcc = PHYS.FRICTION * 0.5;
+    // simple friction along ground. Reduce friction after downhill boosts
+    // so momentum gained from going downhill mostly carries across level ground.
+    const downhillPreserveFactor = 0.12; // keep most downhill speed
+    const baseFrictionFactor = slopeEff > 0 ? downhillPreserveFactor : 0.5;
+    const frictionAcc = PHYS.FRICTION * baseFrictionFactor;
     if (currPlayer.vx > 0) {
       currPlayer.vx = Math.max(0, currPlayer.vx - frictionAcc * dt);
     } else {
       currPlayer.vx = Math.min(0, currPlayer.vx + frictionAcc * dt);
     }
 
-    // Soft cap: taper acceleration above soft start
+    // Velocity deadzone: when the player is grounded and moving very slowly
+    // (and not actively holding forward/back), snap to zero to avoid small
+    // oscillations between nearby slopes.
+    const DEADZONE_V = 10; // px/s
+    if (currPlayer.grounded && Math.abs(currPlayer.vx) < DEADZONE_V && !forward && !back && Math.abs(slopeEff) < 0.25) {
+      currPlayer.vx = 0;
+    }
+
+    // Soft cap: progressively resist further acceleration as speed rises above SOFT_CAP_START.
     if (currPlayer.vx > PHYS.SOFT_CAP_START) {
       const over = currPlayer.vx - PHYS.SOFT_CAP_START;
-      const factor = 1.0 - Math.min(1.0, over / (PHYS.MAX_SPEED - PHYS.SOFT_CAP_START));
-      // we already applied acceleration, so we don't need to do anything here unless we want to clamp
+      const denom = Math.max(1, PHYS.MAX_SPEED - PHYS.SOFT_CAP_START);
+      const frac = Math.min(1, over / denom);
+      // Quadratic ramp: resistance grows with square of fraction (tunable coefficient).
+      const DRAG_COEFF = 4.0; // higher = harder to reach max
+      const resist = DRAG_COEFF * frac * frac * currPlayer.vx;
+      currPlayer.vx = Math.max(PHYS.SOFT_CAP_START, currPlayer.vx - resist * dt);
     }
+    // Absolute clamp to avoid runaway from numerical issues
     currPlayer.vx = Math.min(PHYS.MAX_SPEED, currPlayer.vx);
+
+    // Emit snow/speed particles when player is actively braking or boosting.
+    try {
+      if (ctx.effects && typeof ctx.effects.onSpeed === 'function') {
+        const now = performance.now();
+        const last = (window as any).__lastSpeedEmitTime || 0;
+        // throttle particle emission to avoid spam (every ~100ms)
+        if (now - last > 90) {
+          (window as any).__lastSpeedEmitTime = now;
+          const feetY = currPlayer.y + FEET_OFFSET; // emit from feet/front
+          // determine front X based on current movement direction (front of player)
+          const frontX = currPlayer.x + (currPlayer.vx >= 0 ? HALF_WIDTH : -HALF_WIDTH);
+          const moving = Math.abs(currPlayer.vx) > 8;
+          if (moving) {
+            if (forward && !back) {
+              ctx.effects.onSpeed(frontX, feetY, currPlayer.vx);
+              // boost flame/smoke from back
+              try {
+                ctx.effects.onBoost(backX, feetY, currPlayer.vx);
+              } catch (e) {}
+            } else if (back) {
+              ctx.effects.onSpeed(frontX, feetY, currPlayer.vx);
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // If 'back' is pressed but vx still increased this frame, log throttled diagnostics.
+    try {
+      const deltaV = currPlayer.vx - preVx;
+      const now = performance.now();
+      const last = (window as any).__lastBackIncLogTime || 0;
+      if (back && deltaV > 1 && now - last > 250) {
+        (window as any).__lastBackIncLogTime = now;
+        // eslint-disable-next-line no-console
+        console.warn('[debug][back-inc] vx increased while back pressed', {
+          preVx: Math.round(preVx),
+          postVx: Math.round(currPlayer.vx),
+          delta: Math.round(deltaV),
+          forward,
+          back,
+          slopeEff,
+          accelRaw: Math.round(accelRaw),
+          accelScaled: Math.round(accelScaled),
+          motorAccel,
+          targetSpeed,
+          frictionAcc: Math.round(PHYS.FRICTION * (slopeEff > 0 ? 0.12 : 0.5) * 100) / 100,
+        });
+      }
+    } catch (e) {}
 
     ctx.coyoteTimer = COYOTE_TIME;
   } else {
@@ -187,6 +345,34 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   // integration
   currPlayer.x += currPlayer.vx * dt;
   currPlayer.y += currPlayer.vy * dt;
+
+  // Global high-velocity watchdog: log input + context when vx becomes very large.
+  try {
+    const HV_THRESH = 1000;
+    const now = performance.now();
+    const last = (window as any).__lastHighVxLogTime || 0;
+    if (currPlayer.vx > HV_THRESH && now - last > 500) {
+      (window as any).__lastHighVxLogTime = now;
+      // gather input snapshot
+      const forwardNow = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
+      const backNow = input.get('ArrowLeft').isDown || input.get('a').isDown || input.get('s').isDown;
+      // eslint-disable-next-line no-console
+      console.warn('[debug][HV] high vx', {
+        vx: Math.round(currPlayer.vx),
+        vy: Math.round(currPlayer.vy),
+        grounded: currPlayer.grounded,
+        forward: forwardNow,
+        back: backNow,
+        lastSlopeEff: ctx.lastSlopeEff,
+        lastAccelRaw: Math.round(ctx.lastAccelRaw || 0),
+        lastAccelScaled: Math.round(ctx.lastAccelScaled || 0),
+        hb,
+        hf,
+        avgY,
+        dt,
+      });
+    }
+  } catch (e) {}
 
   // landing detection (if we were airborne and now we are grounded or cross the ground)
   if (!currPlayer.wasGrounded) {
@@ -249,7 +435,10 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   }
 
   // bounds check - don't trigger death if we've already reached the finish
-  if (currPlayer.y > 600 && !ctx.reachedFinish) {
+  // Use level meta virtualHeight when available so taller levels don't prematurely trigger a crash.
+  const levelHeight = (currentLevel && (currentLevel.meta as any)?.virtualHeight) || (globalThis as any).VIRTUAL_HEIGHT || 225;
+  const crashThreshold = Math.max(600, levelHeight + ((globalThis as any).VIRTUAL_HEIGHT || 225));
+  if (currPlayer.y > crashThreshold && !ctx.reachedFinish) {
     if (ctx.state !== 'dead') {
       ctx.state = 'dead';
       ctx.crashFade = 0.6;
