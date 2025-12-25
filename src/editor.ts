@@ -32,6 +32,7 @@ export function startEditor(opts: StartOpts) {
     PlaceFinish = 'PlaceFinish',
     PlaceWall = 'PlaceWall',
     Select = 'Select',
+    Delete = 'Delete',
   }
 
   let currentTool: Tool = Tool.PaintHeight;
@@ -197,6 +198,22 @@ export function startEditor(opts: StartOpts) {
       scheduleOnChange();
       return;
     }
+
+    if (currentTool === Tool.Delete) {
+      const pickRadius = 12; // virtual pixels
+      const radiusSegments = Math.ceil(pickRadius / Math.max(1, segmentLen));
+      const foundIndex = findNearestObjectByIndex(idx, radiusSegments);
+      if (foundIndex !== null) {
+        // remove the object
+        level.objects.splice(foundIndex, 1);
+        selectedObjectIndex = null;
+        scheduleOnChange();
+      } else {
+        statusText = 'No object to delete here';
+        setTimeout(() => (statusText = null), 900);
+      }
+      return;
+    }
   }
 
   function onPointerMove(e: PointerEvent) {
@@ -283,22 +300,16 @@ export function startEditor(opts: StartOpts) {
     else if (k === '4') currentTool = Tool.PlaceStart;
     else if (k === '5') currentTool = Tool.PlaceFinish;
     else if (k === 'v' || k === '0') currentTool = Tool.Select;
+    else if (k === '7') currentTool = Tool.Delete;
     else if (k === 'escape') {
       selectedObjectIndex = null;
       currentTool = Tool.PaintHeight;
     } else if (k === 'delete' || k === 'backspace') {
       if (selectedObjectIndex !== null) {
-        const obj = level.objects[selectedObjectIndex];
-        if (obj.type === 'checkpoint') {
-          level.objects.splice(selectedObjectIndex, 1);
-          selectedObjectIndex = null;
-          scheduleOnChange();
-        } else {
-          statusText = 'Start/Finish cannot be deleted';
-          setTimeout(() => {
-            statusText = null;
-          }, 1200);
-        }
+        // delete currently selected object (allow deletion of start/finish as well)
+        level.objects.splice(selectedObjectIndex, 1);
+        selectedObjectIndex = null;
+        scheduleOnChange();
       }
     }
   }
