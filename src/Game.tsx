@@ -174,6 +174,10 @@ export default function Game() {
       gameContext.currCam.y = gameContext.currPlayer.y;
       gameContext.prevCam = { ...gameContext.currCam };
       // resume play
+      // restore player sprite if it was removed by explosion
+      try {
+        if (!gameContext.playerEntity) gameContext.playerEntity = (gameContext as any).playerEntityTemplate ?? null;
+      } catch (e) { }
       gameContext.state = 'playing';
       stateRef.current = 'playing';
       gameContext.reachedFinish = false;
@@ -275,6 +279,10 @@ export default function Game() {
         if (gameContext.crashTimer > 0) {
           gameContext.crashTimer -= delta;
           gameContext.crashFade = Math.max(0, gameContext.crashFade - delta);
+          try {
+            // keep effects (particles / screen shake) updating so crash explosion animates
+            gameContext.effects.update(delta);
+          } catch (e) { }
         } else {
           // no auto-respawn; wait for user to press `R` to respawn
         }

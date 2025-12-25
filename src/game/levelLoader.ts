@@ -45,13 +45,9 @@ export async function loadLevelAssets(ctx: GameContext) {
 
     try {
       // Prefer the new 64x64 spritesheet if present, fall back to older 32px assets.
-      const pImg = await assetManager.loadImageAny([
-        'sprites/sled-fox-64-spritesheet.png',
-        'sprites/player.png',
-        'sprites/player.svg',
-        'sprites/fox-sled.png',
-        'sprites/fox-sled.svg',
-      ]).catch(() => null);
+      const pImg = await assetManager
+        .loadImageAny(['sprites/sled-fox-64-spritesheet.png', 'sprites/player.png', 'sprites/player.svg', 'sprites/fox-sled.png', 'sprites/fox-sled.svg'])
+        .catch(() => null);
       // assetManager may return a data-URL placeholder when none of the
       // candidates exist. Treat data: URLs as "not found" so we don't create
       // a fake sprite from the placeholder image (which would later render
@@ -117,6 +113,10 @@ export async function loadLevelAssets(ctx: GameContext) {
           }
         } catch (e) {}
         ctx.playerEntity = entity;
+        // keep a template instance so we can restore the sprite after it's nulled on crash
+        try {
+          (ctx as any).playerEntityTemplate = entity;
+        } catch (e) {}
       }
     } catch (e) {}
   } catch (e) {}

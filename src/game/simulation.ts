@@ -401,6 +401,13 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
           try {
             ctx.effects.shake.shake(10);
           } catch (e) {}
+          try {
+            ctx.effects.onCrash(currPlayer.x, currPlayer.y + FEET_OFFSET_LOCAL, currPlayer.vx, currPlayer.vy);
+          } catch (e) {}
+          try {
+            // hide the player sprite so only explosion is visible
+            ctx.playerEntity = null;
+          } catch (e) {}
           break;
         }
       }
@@ -499,6 +506,12 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
               try {
                 ctx.effects.shake.shake(10);
               } catch (e) {}
+              try {
+                ctx.effects.onCrash(currPlayer.x, playerFeetY, currPlayer.vx, currPlayer.vy);
+              } catch (e) {}
+              try {
+                ctx.playerEntity = null;
+              } catch (e) {}
               break;
             }
 
@@ -549,7 +562,15 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
             ctx.crashFade = 0.6;
             ctx.crashTimer = 0.9;
             void ctx.sfxDeath?.play?.();
-            ctx.effects.shake.shake(8);
+            try {
+              ctx.effects.shake.shake(8);
+            } catch (e) {}
+            try {
+              ctx.effects.onCrash(currPlayer.x, currPlayer.y + FEET_OFFSET, currPlayer.vx, currPlayer.vy);
+            } catch (e) {}
+            try {
+              ctx.playerEntity = null;
+            } catch (e) {}
           }
         }
       } else if (obj.type === 'finish') {
@@ -576,6 +597,12 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
       ctx.crashFade = 0.6;
       ctx.crashTimer = 0.9;
       void ctx.sfxDeath?.play?.();
+      try {
+        ctx.effects.onCrash(currPlayer.x, currPlayer.y + FEET_OFFSET, currPlayer.vx, currPlayer.vy);
+      } catch (e) {}
+      try {
+        ctx.playerEntity = null;
+      } catch (e) {}
     }
   }
 

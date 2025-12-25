@@ -37,7 +37,7 @@ export class ParticleSystem {
 
   emitDirectional(x: number, y: number, count = 6, opts: { angle?: number; spread?: number; speed?: number; size?: number; color?: string } = {}) {
     if (!this.enabled) return;
-    const angleBase = opts.angle ?? (Math.PI * 0.5); // default up
+    const angleBase = opts.angle ?? Math.PI * 0.5; // default up
     const spread = opts.spread ?? 0.9; // radians
     const speed = opts.speed ?? 60;
     const size = opts.size ?? 2.5;
@@ -51,6 +51,28 @@ export class ParticleSystem {
         vx: Math.cos(ang) * s + (Math.random() - 0.5) * 6,
         vy: Math.sin(ang) * s + (Math.random() - 0.5) * 4,
         ttl: 0.4 + Math.random() * 0.6,
+        age: 0,
+        size: size * (0.6 + Math.random() * 0.9),
+        color,
+      });
+    }
+  }
+
+  emitExplosion(x: number, y: number, count = 12, opts: { spread?: number; speed?: number; size?: number; color?: string } = {}) {
+    if (!this.enabled) return;
+    const spread = opts.spread ?? 0; // radial jitter
+    const speed = opts.speed ?? 80;
+    const size = opts.size ?? 2.5;
+    const color = opts.color ?? '#ddd';
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const s = speed * (0.4 + Math.random() * 0.8);
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(ang) * s + (Math.random() - 0.5) * spread,
+        vy: Math.sin(ang) * s + (Math.random() - 0.5) * spread,
+        ttl: 0.6 + Math.random() * 0.8,
         age: 0,
         size: size * (0.6 + Math.random() * 0.9),
         color,
@@ -182,6 +204,42 @@ export class EffectsManager {
     this.particles.emitDirectional(x + dir * 6, y - 2, 4, { angle: angleBase + -0.6, spread: 1.0, speed: 36, size: 3.2, color: 'rgba(120,120,120,0.85)' });
     // small speed lines for extra visual feedback
     this.particles.emitSpeedLines(x + (vx > 0 ? -8 : 8), y - 6, 2, { vx, color: 'rgba(255,200,120,0.95)' });
+  }
+
+  onCrash(x: number, y: number, vx = 0, vy = 0) {
+    if (!this.enabled) return;
+    // huge shake and long burst of particles
+    this.shake.shake(30, 1.6);
+
+    // central blast: lots of bright shards (emit in full circle)
+    this.particles.emitExplosion(x, y, 120, { spread: 120, speed: 420, size: 3.6, color: '#ffffff' });
+
+    // layered chunky debris in different tones
+    const colors = ['#d9eaff', '#b3e0ff', '#d9cbb3', '#ffffff', '#9fc8ff'];
+    for (let c = 0; c < colors.length; c++) {
+      this.particles.emitExplosion(x + (Math.random() - 0.5) * 16, y + (Math.random() - 0.5) * 16, 18, {
+        spread: 68,
+        speed: 220 + Math.random() * 300,
+        size: 4 + Math.random() * 6,
+        color: colors[c],
+      });
+    }
+
+    // heavy chunks that arc and fall (simulate debris)
+    for (let i = 0; i < 16; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const s = 180 + Math.random() * 360;
+      this.particles.particles.push({
+        x: x + (Math.random() - 0.5) * 12,
+        y: y + (Math.random() - 0.5) * 12,
+        vx: Math.cos(ang) * s + (vx || 0) * 0.3,
+        vy: Math.sin(ang) * s * 0.8 + (vy || 0) * 0.3,
+        ttl: 1.2 + Math.random() * 1.6,
+        age: 0,
+        size: 6 + Math.random() * 10,
+        color: '#bfcfcf',
+      });
+    }
   }
 }
 
