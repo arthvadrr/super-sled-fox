@@ -49,7 +49,7 @@ export class AssetManager {
     if (this.images.has(name)) return Promise.resolve(this.images.get(name)!);
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    const src = name.startsWith('http') ? name : this.basePath + name;
+    const src = (name.startsWith('http') || name.startsWith('data:') || name.startsWith('/')) ? name : this.basePath + name;
     return new Promise((res) => {
       img.onload = () => {
         this.images.set(name, img);

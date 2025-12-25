@@ -1,4 +1,5 @@
 import type { Level } from './level';
+import assetManager from './assetManager';
 
 type StartOpts = {
   canvas: HTMLCanvasElement;
@@ -33,6 +34,7 @@ export function startEditor(opts: StartOpts) {
     PlaceWall = 'PlaceWall',
     Select = 'Select',
     PlaceSign = 'PlaceSign',
+    PlaceDecor = 'PlaceDecor',
     Delete = 'Delete',
   }
 
@@ -54,6 +56,10 @@ export function startEditor(opts: StartOpts) {
     requestAnimationFrame(() => {
       rafScheduled = false;
       onChange?.();
+      // expose selection state for external UI
+      try {
+        (canvas as any).dataset.editorSelected = selectedObjectIndex !== null ? String(selectedObjectIndex) : '';
+      } catch (e) {}
     });
   }
 
@@ -125,6 +131,23 @@ export function startEditor(opts: StartOpts) {
     const idx = worldXToIndex(wx);
     hoveredIndex = idx;
 
+    // Quick-pick: if clicking near a decor object, select & start dragging it immediately
+    try {
+      const pickRadius = 12; // virtual pixels
+      const radiusSegments = Math.ceil(pickRadius / Math.max(1, segmentLen));
+      const foundIndex = findNearestObjectByIndex(idx, radiusSegments);
+      if (foundIndex !== null) {
+        const fo = level.objects[foundIndex];
+        if (fo && (fo as any).type === 'decor') {
+          selectedObjectIndex = foundIndex;
+          draggingObjectIndex = foundIndex;
+          scheduleOnChange();
+          try { (e.target as Element).setPointerCapture(e.pointerId); } catch (err) {}
+          return;
+        }
+      }
+    } catch (e) {}
+
     if (currentTool === Tool.PaintHeight) {
       const h = worldYToHeight(wy);
       level.segments[idx] = h;
@@ -187,6 +210,27 @@ export function startEditor(opts: StartOpts) {
         }
         if (lines.length > 0) level.objects[selectedObjectIndex].message = lines;
       } catch (e) {}
+      scheduleOnChange();
+      return;
+    }
+
+    if (currentTool === Tool.PlaceDecor) {
+      if (!Array.isArray(level.objects)) level.objects = [] as any;
+      // prefer explicit dataset-selected src, otherwise pick first meta asset containing 'decor'
+      let chosen = (canvas.dataset.editorDecor as string) || '';
+      if (!chosen) {
+        const assets = (level.meta && (level.meta as any).assets) || [];
+        const found = (assets as string[]).find((a) => a && (a.toLowerCase().includes('/decor/') || a.toLowerCase().includes('decor/')));
+        if (found) chosen = found;
+      }
+      // default to empty string if none found
+      const oy = worldYToHeight(wy);
+      const dec: any = { type: 'decor', x: idx, y: oy, src: chosen || '', scale: 1, layer: 1 };
+      level.objects.push(dec);
+      selectedObjectIndex = level.objects.length - 1;
+      // allow immediate repositioning: mark as dragging and switch to Select tool
+      draggingObjectIndex = selectedObjectIndex;
+      currentTool = Tool.Select;
       scheduleOnChange();
       return;
     }
@@ -286,6 +330,11 @@ export function startEditor(opts: StartOpts) {
       if (!obj) return;
       const newX = idx;
       obj.x = Math.max(0, Math.min(level.segments.length - 1, newX));
+      // for decor allow vertical dragging to set y
+      if (obj.type === 'decor') {
+        const hy = worldYToHeight(wy);
+        obj.y = hy;
+      }
       scheduleOnChange();
       return;
     }
@@ -325,6 +374,7 @@ export function startEditor(opts: StartOpts) {
     else if (k === '3') currentTool = Tool.PlaceCheckpoint;
     else if (k === '4') currentTool = Tool.PlaceStart;
     else if (k === '5') currentTool = Tool.PlaceFinish;
+    else if (k === '9') currentTool = Tool.PlaceDecor;
     else if (k === 'v' || k === '0') currentTool = Tool.Select;
     else if (k === '8') currentTool = Tool.PlaceSign;
     else if (k === '7') currentTool = Tool.Delete;
@@ -359,6 +409,19 @@ export function startEditor(opts: StartOpts) {
         // delete currently selected object
         level.objects.splice(selectedObjectIndex, 1);
         selectedObjectIndex = null;
+        scheduleOnChange();
+      }
+    } else if ((k === '+' || k === '=') && selectedObjectIndex !== null) {
+      // increase decor scale
+      const so = level.objects[selectedObjectIndex];
+      if (so && so.type === 'decor') {
+        so.scale = (so.scale || 1) + 0.1;
+        scheduleOnChange();
+      }
+    } else if (k === '-' && selectedObjectIndex !== null) {
+      const so = level.objects[selectedObjectIndex];
+      if (so && so.type === 'decor') {
+        so.scale = Math.max(0.1, (so.scale || 1) - 0.1);
         scheduleOnChange();
       }
     }
@@ -517,6 +580,41 @@ export function startEditor(opts: StartOpts) {
       if (obj.x < startX - 1 || obj.x > endX + 1) continue;
       const ox = obj.x * segmentLen;
       vctx.lineWidth = (selectedObjectIndex === i ? 2 : 1) * onePx;
+      if ((obj as any).type === 'decor') {
+        // don't draw decor that is intended to be behind the ground here;
+        // those are rendered earlier in the main renderer so the editor
+        // overlay shouldn't draw them on top of terrain.
+        const layer = (obj as any).layer;
+        if (typeof layer === 'number' && layer === 0) continue;
+        const oy = typeof (obj as any).y === 'number' ? (obj as any).y : (level.segments[Math.round(obj.x)] as number) || topWorld + viewH / 2;
+        const sx = ox;
+        const sy = oy;
+        try {
+          const src = (obj as any).src || '';
+          const img = assetManager.getImage(src);
+          const scale = (obj as any).scale || 1;
+          if (img) {
+            const w = (img.width || 64) * scale;
+            const h = (img.height || 64) * scale;
+            const drawX = sx - w / 2;
+            const drawY = sy - h;
+            vctx.drawImage(img, drawX, drawY, w, h);
+          } else if (src) {
+            // trigger load and draw placeholder box
+            assetManager.loadImage(src).then(() => scheduleOnChange());
+            vctx.fillStyle = 'rgba(200,200,200,0.4)';
+            vctx.fillRect(sx - 8, sy - 16, 16, 16);
+          } else {
+            vctx.fillStyle = 'rgba(200,200,200,0.6)';
+            vctx.fillRect(sx - 6, sy - 12, 12, 12);
+          }
+        } catch (e) {}
+        if (selectedObjectIndex === i) {
+          vctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          vctx.strokeRect(ox - 6 * onePx, topWorld + 16, 12 * onePx, 12 * onePx);
+        }
+        continue;
+      }
       if ((obj as any).type === 'start') {
         vctx.strokeStyle = '#00ff44';
         vctx.fillStyle = '#00ff44';
@@ -604,6 +702,19 @@ export function startEditor(opts: StartOpts) {
 
   // expose smoothing function on the returned stop so external UI can trigger it
   (stop as any).smoothSegments = smoothSegments;
+  // allow external UI to request an update/push a change into the editor overlay
+  (stop as any).notify = function () {
+    try {
+      scheduleOnChange();
+    } catch (e) {}
+  };
+  // allow external UI to change the active tool
+  (stop as any).setTool = function (toolName: string) {
+    try {
+      const t = (Tool as any)[toolName] as Tool | undefined;
+      if (t) currentTool = t;
+    } catch (e) {}
+  };
 
   return stop;
 }

@@ -475,130 +475,82 @@ export default function Game() {
                   },
                 });
 
+                // single fixed container for all editor UI elements
+                const editorUI = document.createElement('div');
+                editorUI.id = 'editor-ui';
+                editorUI.className = 'editor-ui';
+                document.body.appendChild(editorUI);
+
                 // Export / Import UI (only present while editor active)
                 const exportBtn = document.createElement('button');
                 exportBtn.textContent = 'Export Level';
-                exportBtn.style.position = 'fixed';
-                exportBtn.style.right = '12px';
-                exportBtn.style.bottom = '12px';
-                exportBtn.style.zIndex = '9999';
-                exportBtn.style.padding = '6px 8px';
-                exportBtn.style.background = '#222';
-                exportBtn.style.color = '#ffd700';
-                document.body.appendChild(exportBtn);
+                exportBtn.className = 'editor-btn export';
+                editorUI.appendChild(exportBtn);
 
                 const fileInput = document.createElement('input');
                 fileInput.type = 'file';
                 fileInput.accept = 'application/json';
-                fileInput.style.display = 'none';
-                document.body.appendChild(fileInput);
+                fileInput.className = 'editor-fileinput';
+                editorUI.appendChild(fileInput);
 
                 const importBtn = document.createElement('button');
                 importBtn.textContent = 'Import Level';
-                importBtn.style.position = 'fixed';
-                importBtn.style.right = '120px';
-                importBtn.style.bottom = '12px';
-                importBtn.style.zIndex = '9999';
-                importBtn.style.padding = '6px 8px';
-                importBtn.style.background = '#222';
-                importBtn.style.color = '#fff';
-                document.body.appendChild(importBtn);
+                importBtn.className = 'editor-btn';
+                editorUI.appendChild(importBtn);
 
                 // --- Level resize UI ---
                 const widthLabel = document.createElement('label');
-                widthLabel.style.position = 'fixed';
-                widthLabel.style.right = '240px';
-                widthLabel.style.bottom = '12px';
-                widthLabel.style.zIndex = '9999';
-                widthLabel.style.color = '#fff';
-                widthLabel.style.fontFamily = 'monospace';
-                widthLabel.style.fontSize = '12px';
-                widthLabel.style.display = 'flex';
-                widthLabel.style.gap = '6px';
+                widthLabel.className = 'editor-panel';
 
                 const widthInput = document.createElement('input');
                 widthInput.type = 'number';
                 widthInput.min = '1';
                 widthInput.value = String((currentLevel.meta && (currentLevel.meta as any).width) || (currentLevel.segments && currentLevel.segments.length) || 0);
-                widthInput.style.width = '80px';
-                widthInput.style.padding = '4px';
-                widthInput.style.background = '#222';
-                widthInput.style.color = '#fff';
-                widthInput.style.border = '1px solid #444';
+                widthInput.className = 'editor-input';
 
                 const resizeBtn = document.createElement('button');
                 resizeBtn.textContent = 'Resize Width';
-                resizeBtn.style.padding = '6px 8px';
-                resizeBtn.style.background = '#222';
-                resizeBtn.style.color = '#fff';
+                resizeBtn.className = 'editor-btn';
 
                 widthLabel.appendChild(widthInput);
                 widthLabel.appendChild(resizeBtn);
-                document.body.appendChild(widthLabel);
+                editorUI.appendChild(widthLabel);
 
                 const heightLabel = document.createElement('label');
-                heightLabel.style.position = 'fixed';
-                heightLabel.style.right = '420px';
-                heightLabel.style.bottom = '12px';
-                heightLabel.style.zIndex = '9999';
-                heightLabel.style.color = '#fff';
-                heightLabel.style.fontFamily = 'monospace';
-                heightLabel.style.fontSize = '12px';
-                heightLabel.style.display = 'flex';
-                heightLabel.style.gap = '6px';
+                heightLabel.className = 'editor-panel';
 
                 const heightInput = document.createElement('input');
                 heightInput.type = 'number';
                 heightInput.min = '0';
                 heightInput.value = String((currentLevel.meta && (currentLevel.meta as any).virtualHeight) || VIRTUAL_HEIGHT);
-                heightInput.style.width = '80px';
-                heightInput.style.padding = '4px';
-                heightInput.style.background = '#222';
-                heightInput.style.color = '#fff';
-                heightInput.style.border = '1px solid #444';
+                heightInput.className = 'editor-input';
 
                 const setHeightBtn = document.createElement('button');
                 setHeightBtn.textContent = 'Set Height';
-                setHeightBtn.style.padding = '6px 8px';
-                setHeightBtn.style.background = '#222';
-                setHeightBtn.style.color = '#fff';
+                setHeightBtn.className = 'editor-btn';
 
                 heightLabel.appendChild(heightInput);
                 heightLabel.appendChild(setHeightBtn);
-                document.body.appendChild(heightLabel);
+                editorUI.appendChild(heightLabel);
 
                 // --- Avalanche speed UI ---
                 const avalancheLabel = document.createElement('label');
-                avalancheLabel.style.position = 'fixed';
-                avalancheLabel.style.right = '680px';
-                avalancheLabel.style.bottom = '12px';
-                avalancheLabel.style.zIndex = '9999';
-                avalancheLabel.style.color = '#fff';
-                avalancheLabel.style.fontFamily = 'monospace';
-                avalancheLabel.style.fontSize = '12px';
-                avalancheLabel.style.display = 'flex';
-                avalancheLabel.style.gap = '6px';
+                avalancheLabel.className = 'editor-panel';
 
                 const avalancheInput = document.createElement('input');
                 avalancheInput.type = 'number';
                 avalancheInput.min = '0';
                 avalancheInput.step = '1';
                 avalancheInput.value = String((currentLevel.meta && (currentLevel.meta as any).avalancheSpeed) || 0);
-                avalancheInput.style.width = '64px';
-                avalancheInput.style.padding = '4px';
-                avalancheInput.style.background = '#222';
-                avalancheInput.style.color = '#fff';
-                avalancheInput.style.border = '1px solid #444';
+                avalancheInput.className = 'editor-input';
 
                 const setAvalBtn = document.createElement('button');
                 setAvalBtn.textContent = 'Set Avalanche';
-                setAvalBtn.style.padding = '6px 8px';
-                setAvalBtn.style.background = '#222';
-                setAvalBtn.style.color = '#fff';
+                setAvalBtn.className = 'editor-btn';
 
                 avalancheLabel.appendChild(avalancheInput);
                 avalancheLabel.appendChild(setAvalBtn);
-                document.body.appendChild(avalancheLabel);
+                editorUI.appendChild(avalancheLabel);
 
                 setAvalBtn.onclick = () => {
                   const v = Math.max(0, Number(avalancheInput.value) || 0);
@@ -608,35 +560,198 @@ export default function Game() {
 
                 // --- Smooth UI ---
                 const smoothLabel = document.createElement('label');
-                smoothLabel.style.position = 'fixed';
-                smoothLabel.style.right = '560px';
-                smoothLabel.style.bottom = '12px';
-                smoothLabel.style.zIndex = '9999';
-                smoothLabel.style.color = '#fff';
-                smoothLabel.style.fontFamily = 'monospace';
-                smoothLabel.style.fontSize = '12px';
-                smoothLabel.style.display = 'flex';
-                smoothLabel.style.gap = '6px';
+                smoothLabel.className = 'editor-panel';
 
                 const radiusInput = document.createElement('input');
                 radiusInput.type = 'number';
                 radiusInput.min = '1';
                 radiusInput.value = '1';
-                radiusInput.style.width = '48px';
-                radiusInput.style.padding = '4px';
-                radiusInput.style.background = '#222';
-                radiusInput.style.color = '#fff';
-                radiusInput.style.border = '1px solid #444';
+                radiusInput.className = 'editor-input';
 
                 const smoothBtn = document.createElement('button');
                 smoothBtn.textContent = 'Smooth';
-                smoothBtn.style.padding = '6px 8px';
-                smoothBtn.style.background = '#222';
-                smoothBtn.style.color = '#fff';
+                smoothBtn.className = 'editor-btn';
 
                 smoothLabel.appendChild(radiusInput);
                 smoothLabel.appendChild(smoothBtn);
-                document.body.appendChild(smoothLabel);
+                editorUI.appendChild(smoothLabel);
+
+                // --- Decor palette ---
+                const decorLabel = document.createElement('div');
+                decorLabel.id = 'editor-decor-label';
+                decorLabel.className = 'editor-panel';
+
+                const paletteRow = document.createElement('div');
+                paletteRow.className = 'palette-row';
+
+                const BUILT_IN_DECOR = [
+                  'decor/christmas-tree.png',
+                  'decor/dark-pine-tree-2.png',
+                  'decor/dead-tree.png',
+                  'decor/pine-tree-dark.png',
+                  'decor/snowy-cabin.png',
+                  'decor/wood-cabin-2.png',
+                ];
+
+                function refreshPalette() {
+                  // clear
+                  while (paletteRow.firstChild) paletteRow.removeChild(paletteRow.firstChild);
+                  const assets = (currentLevel.meta && (currentLevel.meta as any).assets) || [];
+                  // combine level assets + built-in decor, dedupe
+                  const combined = Array.from(new Set([...(assets as string[]).filter((a) => typeof a === 'string'), ...BUILT_IN_DECOR]));
+                  const decorAssets = combined.filter((a) => typeof a === 'string' && (a.startsWith('data:') || a.toLowerCase().includes('/decor/') || a.toLowerCase().includes('decor/')));
+                  for (const a of decorAssets) {
+                    const thumb = document.createElement('img');
+                    thumb.className = 'thumb';
+                    thumb.title = String(a);
+                    // load via assetManager so basePath applied
+                    (async () => {
+                      try {
+                        const im = await assetManager.loadImage(String(a));
+                        thumb.src = im.src;
+                      } catch (e) {
+                        // ignore
+                      }
+                    })();
+                    thumb.onclick = () => {
+                      const canvasElInner = canvasRef.current!;
+                      canvasElInner.dataset.editorDecor = String(a);
+                      // highlight selection
+                      for (const node of Array.from(paletteRow.children)) (node as HTMLElement).classList.remove('selected');
+                      thumb.classList.add('selected');
+                      // switch editor into place-decor tool
+                      try { (gameContext.editorStop as any)?.setTool?.('PlaceDecor'); } catch (e) {}
+                    };
+                    paletteRow.appendChild(thumb);
+                  }
+                }
+
+                decorLabel.appendChild(paletteRow);
+                editorUI.appendChild(decorLabel);
+                refreshPalette();
+
+                // small floating menu for selected decor: resize + delete
+                const decorMenu = document.createElement('div');
+                decorMenu.id = 'editor-decor-menu';
+                decorMenu.className = 'decor-menu';
+                // start hidden
+                decorMenu.style.display = 'none';
+
+                const scaleLabel = document.createElement('div');
+                scaleLabel.textContent = 'Scale: ';
+                const scaleVal = document.createElement('span');
+                scaleVal.textContent = '1.0';
+                scaleLabel.appendChild(scaleVal);
+                decorMenu.appendChild(scaleLabel);
+
+                const layerLabel = document.createElement('div');
+                layerLabel.textContent = 'Layer: ';
+                const layerSelect = document.createElement('select');
+                const optBehind = document.createElement('option'); optBehind.value = '0'; optBehind.text = 'Behind (0)';
+                const optFront = document.createElement('option'); optFront.value = '1'; optFront.text = 'Front (1)';
+                layerSelect.appendChild(optFront);
+                layerSelect.appendChild(optBehind);
+                // spacing handled by CSS
+                layerLabel.appendChild(layerSelect);
+                decorMenu.appendChild(layerLabel);
+
+                const scaleMinus = document.createElement('button');
+                scaleMinus.textContent = '-';
+                scaleMinus.className = 'editor-btn';
+                const scalePlus = document.createElement('button');
+                scalePlus.textContent = '+';
+                scalePlus.className = 'editor-btn';
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.className = 'editor-btn delete';
+
+                decorMenu.appendChild(scaleMinus);
+                decorMenu.appendChild(scalePlus);
+                decorMenu.appendChild(deleteBtn);
+                editorUI.appendChild(decorMenu);
+
+                // poll selection state from editor via canvas.dataset.editorSelected
+                const pollId = window.setInterval(() => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) {
+                      decorMenu.style.display = 'none';
+                      return;
+                    }
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'decor') {
+                      decorMenu.style.display = 'none';
+                      return;
+                    }
+                    // show menu and update scale value
+                    decorMenu.style.display = 'flex';
+                    scaleVal.textContent = String((obj as any).scale || 1);
+                    // update layer select
+                    try { layerSelect.value = String((obj as any).layer ?? 1); } catch (e) {}
+                  } catch (e) {}
+                }, 150);
+
+                scalePlus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'decor') return;
+                    obj.scale = (obj.scale || 1) + 0.1;
+                    // notify editor overlay to refresh
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
+                  } catch (e) {}
+                };
+                scaleMinus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'decor') return;
+                    obj.scale = Math.max(0.1, (obj.scale || 1) - 0.1);
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
+                  } catch (e) {}
+                };
+                deleteBtn.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    if (!Array.isArray(currentLevel.objects)) return;
+                    if (idx >= 0 && idx < currentLevel.objects.length) {
+                      currentLevel.objects.splice(idx, 1);
+                      // clear selection marker and notify
+                      canvasElInner.dataset.editorSelected = '';
+                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
+                    }
+                  } catch (e) {}
+                };
+
+                layerSelect.onchange = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'decor') return;
+                    obj.layer = Number(layerSelect.value) || 0;
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
+                  } catch (e) {}
+                };
+
+                // attach menu to cleanup list
+                (gameContext.editorStop as any).__exportImportNodes = { ...(gameContext.editorStop as any).__exportImportNodes || {}, decorLabel, decorMenu, pollId };
+                // store pollId globally as a fallback so we can clear it if needed
+                try { (window as any).__editor_decor_poll = pollId; } catch (e) {}
+
 
                 smoothBtn.onclick = () => {
                   try {
@@ -685,13 +800,7 @@ export default function Game() {
                 const showError = (msg: string) => {
                   const el = document.createElement('div');
                   el.textContent = msg;
-                  el.style.position = 'fixed';
-                  el.style.left = '12px';
-                  el.style.bottom = '12px';
-                  el.style.background = 'rgba(0,0,0,0.8)';
-                  el.style.color = '#fff';
-                  el.style.padding = '8px 12px';
-                  el.style.zIndex = '9999';
+                  el.className = 'editor-toast';
                   document.body.appendChild(el);
                   setTimeout(() => el.remove(), 4000);
                 };
@@ -759,7 +868,7 @@ export default function Game() {
                 window.addEventListener('dragover', onDragOver);
 
                 // attach to editor handlers for cleanup
-                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn };
+                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn, decorLabel, decorMenu, pollId, editorUI };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -877,9 +986,21 @@ export default function Game() {
                     try { nodes.avalancheLabel && nodes.avalancheLabel.remove(); } catch (e) { }
                     try { nodes.setAvalBtn && nodes.setAvalBtn.remove(); } catch (e) { }
                     try { nodes.avalancheInput && nodes.avalancheInput.remove(); } catch (e) { }
+                    try { nodes.decorLabel && nodes.decorLabel.remove(); } catch (e) { }
+                    try { nodes.uploadBtn && nodes.uploadBtn.remove(); } catch (e) { }
+                    try { nodes.uploadInput && nodes.uploadInput.remove(); } catch (e) { }
                     try { window.removeEventListener('drop', nodes.onDrop); } catch (e) { }
                     try { window.removeEventListener('dragover', nodes.onDragOver); } catch (e) { }
+                    try { nodes.editorUI && nodes.editorUI.remove(); } catch (e) {}
+                    try { const n3 = document.getElementById('editor-ui'); if (n3) n3.remove(); } catch (e) {}
                   }
+                } catch (e) { }
+                // additional safety: remove any lingering decor UI by ID and clear poll
+                try {
+                  try { const n = document.getElementById('editor-decor-menu'); if (n) n.remove(); } catch (e) {}
+                  try { const n2 = document.getElementById('editor-decor-label'); if (n2) n2.remove(); } catch (e) {}
+                  try { const pid = (gameContext.editorStop as any).__exportImportNodes && (gameContext.editorStop as any).__exportImportNodes.pollId; if (pid) clearInterval(pid); } catch (e) {}
+                  try { if ((window as any).__editor_decor_poll) { clearInterval((window as any).__editor_decor_poll); (window as any).__editor_decor_poll = null; } } catch (e) {}
                 } catch (e) { }
                 try { (gameContext.editorStop as any)(); } catch (e) { }
                 gameContext.editorStop = null;

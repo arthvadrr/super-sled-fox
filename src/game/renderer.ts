@@ -1,6 +1,7 @@
 import { VIRTUAL_WIDTH, VIRTUAL_HEIGHT, RENDER_SETTINGS, FIXED_DT } from './constants';
 import { GameContext } from './types';
 import { getHeightAtX } from '../heightmap';
+import assetManager from '../assetManager';
 
 const { PIXEL_SNAP, PADDING } = RENDER_SETTINGS;
 
@@ -141,6 +142,33 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
         } catch (e) {}
         vctx.restore();
       }
+    }
+  } catch (e) {}
+
+  // Draw decor objects that should appear behind the ground before drawing terrain.
+  try {
+    const objs = currentLevel.objects || [];
+    for (const obj of objs) {
+      if (!obj || obj.type !== 'decor') continue;
+      const layer = (obj as any).layer;
+      if (typeof layer === 'number' && layer !== 0) continue; // only layer 0 here
+      try {
+        const oyWorld = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
+        const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
+        const sy = isEditor ? wyToS(oyWorld) : oyWorld - camOffsetY + shakeY;
+        const scale = (obj as any).scale || 1;
+        const src = (obj as any).src || '';
+        const img = src ? assetManager.getImage(src) : undefined;
+        if (img) {
+          const w = (img.width || 64) * scale * zoom;
+          const h = (img.height || 64) * scale * zoom;
+          const dx = sx - w / 2;
+          const dy = sy - h;
+          vctx.drawImage(img, dx, dy, w, h);
+        } else if (src) {
+          assetManager.loadImage(src).catch(() => {});
+        }
+      } catch (e) {}
     }
   } catch (e) {}
 
@@ -333,7 +361,29 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     const radius = (obj.radius || 12) * zoom;
     if (sx < -radius || sx > VIRTUAL_WIDTH + radius) continue;
 
-    if (obj.type === 'hazard') {
+    if (obj.type === 'decor') {
+      // skip decor already drawn behind the ground (layer === 0)
+      const layer = (obj as any).layer;
+      if (typeof layer === 'number' && layer === 0) continue;
+      try {
+        const oyWorld = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
+        const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
+        const sy = isEditor ? wyToS(oyWorld) : oyWorld - camOffsetY + shakeY;
+        const scale = (obj as any).scale || 1;
+        const src = (obj as any).src || '';
+        const img = src ? assetManager.getImage(src) : undefined;
+        if (img) {
+          const w = (img.width || 64) * scale * zoom;
+          const h = (img.height || 64) * scale * zoom;
+          const dx = sx - w / 2;
+          const dy = sy - h;
+          vctx.drawImage(img, dx, dy, w, h);
+        } else if (src) {
+          // trigger async load so it appears next frame
+          assetManager.loadImage(src).catch(() => {});
+        }
+      } catch (e) {}
+    } else if (obj.type === 'hazard') {
       vctx.fillStyle = '#ff4444';
       vctx.beginPath();
       vctx.arc(sx, sy, radius, 0, Math.PI * 2);
