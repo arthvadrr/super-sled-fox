@@ -552,7 +552,13 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const distSq = dx * dx + dy * dy;
     const radius = obj.radius || 12;
 
-    if (distSq < radius * radius) {
+    // Allow finish to trigger when the player crosses the object's X coordinate
+    // during this frame (swept X test) so jumping directly over the finish
+    // will still register as completing the level.
+    const prevX = currPlayer.x - currPlayer.vx * dt;
+    const crossedX = (prevX <= ox && currPlayer.x >= ox) || (prevX >= ox && currPlayer.x <= ox);
+
+    if (distSq < radius * radius || crossedX) {
       if (obj.type === 'hazard' || (obj as any).type === 'wall') {
         // don't allow hazards to kill the player once they've reached the finish
         if (!ctx.reachedFinish && currPlayer.invulnTimer <= 0) {
