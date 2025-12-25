@@ -657,6 +657,8 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
         const barW = VIRTUAL_WIDTH - MARGIN * 2;
         const barH = 18;
 
+        // (avalanche top band removed)
+
         // no background band: flags render directly on top of view
 
         // draw flags in a compact row centered at the top
@@ -701,6 +703,51 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
           vctx.fill();
           vctx.restore();
         }
+        // small boost/stamina bar centered under the flags (below the top band)
+        try {
+          const stamina = typeof ctx.boostStamina === 'number' ? ctx.boostStamina : 1;
+          const barW = 40;
+          const barH = 3;
+
+          // compute player screen position
+          const playerSX = isEditor ? wxToS(ix) : ix - camOffsetX;
+          const playerSY = isEditor ? wyToS(iy) : iy - camOffsetY + shakeY;
+          const barX = Math.round(playerSX - barW / 2) + 2;
+          const barY = Math.round(playerSY + 20);
+
+          // compute opacity per rules:
+          const isBoosting = !!(ctx as any).isBoosting;
+          const locked = !!(ctx as any).boostLocked;
+          const blinkOn = !!(ctx as any).boostBlinkOn;
+          const fullVisible = ((ctx as any).boostFullVisibleTimer || 0) > 0;
+
+          let opacity = 0;
+          if (isBoosting) opacity = 1.0;
+          else if (locked) opacity = 1.0; // keep fully visible when depleted (border will blink)
+          else if (fullVisible) opacity = 1.0;
+          else opacity = stamina >= 1 - 1e-6 ? 0.0 : 1.0; // do not reduce opacity while refilling
+
+          if (opacity > 0) {
+            vctx.save();
+            vctx.globalAlpha = opacity;
+
+            vctx.fillStyle = '#222';
+            vctx.fillRect(barX, barY, barW, barH);
+            const innerPad = 1;
+            const innerW = Math.max(0, Math.round((barW - innerPad * 2) * stamina));
+            const innerH = Math.max(0, barH - innerPad * 2);
+            const innerColor = locked ? '#ff4444' : '#4eeaf7';
+            vctx.fillStyle = innerColor;
+            vctx.fillRect(barX + innerPad, barY + innerPad, innerW, innerH);
+            const strokeColor = locked ? (blinkOn ? 'rgba(255,68,68,0.95)' : 'rgba(255,68,68,0.6)') : 'rgba(136,136,136,0.28)';
+            vctx.strokeStyle = strokeColor;
+            vctx.lineWidth = 0.5;
+            vctx.strokeRect(barX + 0.5, barY + 0.5, barW - 1, barH - 1);
+
+            vctx.restore();
+          }
+        } catch (e) {}
+        // top band removed
       }
     } catch (e) {}
 

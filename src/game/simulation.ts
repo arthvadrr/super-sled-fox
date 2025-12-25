@@ -34,6 +34,22 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   ctx.jumpHold = Math.max(0, ctx.jumpHold - dt);
   ctx.jumpAppliedThisFrame = false;
 
+  // boost/stamina: decrement refill-block timer if present
+  ctx.boostRefillBlockedTimer = Math.max(0, (ctx.boostRefillBlockedTimer || 0) - dt);
+
+  // boost UI timers: blink when locked, and full-visible timer
+  try {
+    if (ctx.boostLocked) {
+      ctx.boostBlinkTimer = (ctx.boostBlinkTimer || 0) + dt;
+      const BLINK_PERIOD = 0.6;
+      if (ctx.boostBlinkTimer >= BLINK_PERIOD) {
+        ctx.boostBlinkTimer -= BLINK_PERIOD;
+        ctx.boostBlinkOn = !ctx.boostBlinkOn;
+      }
+    }
+    ctx.boostFullVisibleTimer = Math.max(0, (ctx.boostFullVisibleTimer || 0) - dt);
+  } catch (e) {}
+
   // decrement invulnerability timer
   currPlayer.invulnTimer = Math.max(0, (currPlayer.invulnTimer || 0) - dt);
 
@@ -61,6 +77,8 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         }
       }
     } catch (e) {}
+
+    // (was exposing boosting here, but `boosting` isn't in scope)
   };
 
   // decay jump lock
@@ -114,9 +132,14 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     // input speed modifiers and braking — read input early so we can respect braking intent
     const forward = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
     const back = input.get('ArrowLeft').isDown || input.get('a').isDown || input.get('s').isDown;
+    const boostAvailable = (typeof ctx.boostStamina === 'number' ? ctx.boostStamina : 1) > 0 && !ctx.boostLocked;
+    let boosting = forward && !back && boostAvailable;
     let speedMul = 1.0;
-    if (forward) speedMul = 1.5;
+    if (boosting) speedMul = 1.5;
     else if (back) speedMul = 0.5;
+    try {
+      ctx.isBoosting = !!boosting;
+    } catch (e) {}
     const targetSpeed = PHYS.BASE_CRUISE_SPEED * speedMul;
 
     // grounded motion: acceleration along slope from gravity projection
@@ -185,6 +208,40 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         }
       } catch (e) {}
     }
+
+    // Boost/stamina handling while player is holding the forward key.
+    // Deplete fully in ~4s while held; refill at ~8s when not held. If emptied,
+    // start a refill-block timer (4s) before automatic refill begins.
+    try {
+      const STAMINA_DEPLETION_RATE = 1 / 2; // per second (3s to deplete)
+      const STAMINA_REFILL_RATE = 1 / 2; // per second (9s to refill)
+      const STAMINA_REFILL_DELAY_AFTER_EMPTY = 2; // seconds delay when emptied (reduced)
+      if (typeof ctx.boostStamina !== 'number') ctx.boostStamina = 1;
+      if (forward && !back && boostAvailable) {
+        // consuming stamina while boosting
+        if (ctx.boostStamina > 0) {
+          ctx.boostStamina = Math.max(0, ctx.boostStamina - STAMINA_DEPLETION_RATE * dt);
+          if (ctx.boostStamina === 0) {
+            ctx.boostRefillBlockedTimer = STAMINA_REFILL_DELAY_AFTER_EMPTY;
+            ctx.boostLocked = true; // lock boosting until fully refilled
+            boosting = false;
+          }
+        }
+      } else {
+        // refill when not boosting and refill delay expired
+        if ((ctx.boostRefillBlockedTimer || 0) <= 0) {
+          const prev = ctx.boostStamina;
+          ctx.boostStamina = Math.min(1, ctx.boostStamina + STAMINA_REFILL_RATE * dt);
+          // if we were locked and have now reached full, unlock and show full for 1s
+          if (ctx.boostLocked && ctx.boostStamina >= 1) {
+            ctx.boostLocked = false;
+            ctx.boostFullVisibleTimer = 1.0;
+            ctx.boostBlinkTimer = 0;
+            ctx.boostBlinkOn = false;
+          }
+        }
+      }
+    } catch (e) {}
 
     // Debugging/logging for 'a' press runaway: throttle logs to avoid spam.
     try {
@@ -277,7 +334,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
             if (forward && !back) {
               ctx.effects.onSpeed(frontX, feetY, currPlayer.vx);
               try {
-                ctx.effects.onBoost(backX, feetY, currPlayer.vx);
+                if (boosting) ctx.effects.onBoost(backX, feetY, currPlayer.vx);
               } catch (e) {}
             } else if (back) {
               ctx.effects.onSpeed(frontX, feetY, currPlayer.vx);
@@ -309,6 +366,15 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
 
     // angle should level out toward 0 in air
     currPlayer.angle *= 1.0 - 2.0 * dt;
+    // Allow stamina refill while airborne when not holding forward
+    try {
+      const forwardAir = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
+      if (typeof ctx.boostStamina !== 'number') ctx.boostStamina = 1;
+      if (!forwardAir && (ctx.boostRefillBlockedTimer || 0) <= 0) {
+        const STAMINA_REFILL_RATE = 1 / 9;
+        ctx.boostStamina = Math.min(1, ctx.boostStamina + STAMINA_REFILL_RATE * dt);
+      }
+    } catch (e) {}
   }
 
   // Jump logic

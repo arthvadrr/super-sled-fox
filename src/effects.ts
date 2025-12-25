@@ -199,11 +199,13 @@ export class EffectsManager {
     const dir = vx >= 0 ? -1 : 1;
     const angleBase = dir < 0 ? Math.PI : 0; // left or right
     // Emit a few flame sparks
-    this.particles.emitDirectional(x + dir * 10, y - 4, 6, { angle: angleBase, spread: 0.8, speed: 140, size: 1.6, color: '#ffb86b' });
-    // Emit smoke: slower, larger, drifting upward/back
-    this.particles.emitDirectional(x + dir * 6, y - 2, 4, { angle: angleBase + -0.6, spread: 1.0, speed: 36, size: 3.2, color: 'rgba(120,120,120,0.85)' });
-    // small speed lines for extra visual feedback
-    this.particles.emitSpeedLines(x + (vx > 0 ? -8 : 8), y - 6, 2, { vx, color: 'rgba(255,200,120,0.95)' });
+    // stronger flame: more particles, larger and faster
+    // much faster flame particles
+    this.particles.emitDirectional(x + dir * 10, y - 4, 14, { angle: angleBase, spread: 1.4, speed: 520, size: 3.2, color: '#ffb86b' });
+    // much faster thicker smoke (still larger but accelerated)
+    this.particles.emitDirectional(x + dir * 6, y - 2, 10, { angle: angleBase - 0.6, spread: 1.6, speed: 300, size: 6.0, color: 'rgba(120,120,120,0.96)' });
+    // extra speed lines for strong visual feedback
+    this.particles.emitSpeedLines(x + (vx > 0 ? -8 : 8), y - 6, 8, { vx: vx * 1.2, color: 'rgba(255,200,120,0.98)' });
   }
 
   onCrash(x: number, y: number, vx = 0, vy = 0) {

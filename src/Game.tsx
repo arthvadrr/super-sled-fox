@@ -141,6 +141,14 @@ export default function Game() {
       snowPattern,
       noisePattern,
       woodPattern,
+      // boost/stamina defaults
+      boostStamina: 1,
+      boostRefillBlockedTimer: 0,
+      boostLocked: false,
+      boostFullVisibleTimer: 0,
+      boostBlinkTimer: 0,
+      boostBlinkOn: false,
+      isBoosting: false,
 
       accumulator: 0,
       lastTime: performance.now()
@@ -620,7 +628,7 @@ export default function Game() {
                       for (const node of Array.from(paletteRow.children)) (node as HTMLElement).classList.remove('selected');
                       thumb.classList.add('selected');
                       // switch editor into place-decor tool
-                      try { (gameContext.editorStop as any)?.setTool?.('PlaceDecor'); } catch (e) {}
+                      try { (gameContext.editorStop as any)?.setTool?.('PlaceDecor'); } catch (e) { }
                     };
                     paletteRow.appendChild(thumb);
                   }
@@ -689,8 +697,8 @@ export default function Game() {
                     decorMenu.style.display = 'flex';
                     scaleVal.textContent = String((obj as any).scale || 1);
                     // update layer select
-                    try { layerSelect.value = String((obj as any).layer ?? 1); } catch (e) {}
-                  } catch (e) {}
+                    try { layerSelect.value = String((obj as any).layer ?? 1); } catch (e) { }
+                  } catch (e) { }
                 }, 150);
 
                 scalePlus.onclick = () => {
@@ -703,8 +711,8 @@ export default function Game() {
                     if (!obj || obj.type !== 'decor') return;
                     obj.scale = (obj.scale || 1) + 0.1;
                     // notify editor overlay to refresh
-                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
-                  } catch (e) {}
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
                 };
                 scaleMinus.onclick = () => {
                   try {
@@ -715,8 +723,8 @@ export default function Game() {
                     const obj = currentLevel.objects && currentLevel.objects[idx];
                     if (!obj || obj.type !== 'decor') return;
                     obj.scale = Math.max(0.1, (obj.scale || 1) - 0.1);
-                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
-                  } catch (e) {}
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
                 };
                 deleteBtn.onclick = () => {
                   try {
@@ -729,9 +737,9 @@ export default function Game() {
                       currentLevel.objects.splice(idx, 1);
                       // clear selection marker and notify
                       canvasElInner.dataset.editorSelected = '';
-                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
+                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
                     }
-                  } catch (e) {}
+                  } catch (e) { }
                 };
 
                 layerSelect.onchange = () => {
@@ -743,14 +751,14 @@ export default function Game() {
                     const obj = currentLevel.objects && currentLevel.objects[idx];
                     if (!obj || obj.type !== 'decor') return;
                     obj.layer = Number(layerSelect.value) || 0;
-                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) {}
-                  } catch (e) {}
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
                 };
 
                 // attach menu to cleanup list
                 (gameContext.editorStop as any).__exportImportNodes = { ...(gameContext.editorStop as any).__exportImportNodes || {}, decorLabel, decorMenu, pollId };
                 // store pollId globally as a fallback so we can clear it if needed
-                try { (window as any).__editor_decor_poll = pollId; } catch (e) {}
+                try { (window as any).__editor_decor_poll = pollId; } catch (e) { }
 
 
                 smoothBtn.onclick = () => {
@@ -991,16 +999,16 @@ export default function Game() {
                     try { nodes.uploadInput && nodes.uploadInput.remove(); } catch (e) { }
                     try { window.removeEventListener('drop', nodes.onDrop); } catch (e) { }
                     try { window.removeEventListener('dragover', nodes.onDragOver); } catch (e) { }
-                    try { nodes.editorUI && nodes.editorUI.remove(); } catch (e) {}
-                    try { const n3 = document.getElementById('editor-ui'); if (n3) n3.remove(); } catch (e) {}
+                    try { nodes.editorUI && nodes.editorUI.remove(); } catch (e) { }
+                    try { const n3 = document.getElementById('editor-ui'); if (n3) n3.remove(); } catch (e) { }
                   }
                 } catch (e) { }
                 // additional safety: remove any lingering decor UI by ID and clear poll
                 try {
-                  try { const n = document.getElementById('editor-decor-menu'); if (n) n.remove(); } catch (e) {}
-                  try { const n2 = document.getElementById('editor-decor-label'); if (n2) n2.remove(); } catch (e) {}
-                  try { const pid = (gameContext.editorStop as any).__exportImportNodes && (gameContext.editorStop as any).__exportImportNodes.pollId; if (pid) clearInterval(pid); } catch (e) {}
-                  try { if ((window as any).__editor_decor_poll) { clearInterval((window as any).__editor_decor_poll); (window as any).__editor_decor_poll = null; } } catch (e) {}
+                  try { const n = document.getElementById('editor-decor-menu'); if (n) n.remove(); } catch (e) { }
+                  try { const n2 = document.getElementById('editor-decor-label'); if (n2) n2.remove(); } catch (e) { }
+                  try { const pid = (gameContext.editorStop as any).__exportImportNodes && (gameContext.editorStop as any).__exportImportNodes.pollId; if (pid) clearInterval(pid); } catch (e) { }
+                  try { if ((window as any).__editor_decor_poll) { clearInterval((window as any).__editor_decor_poll); (window as any).__editor_decor_poll = null; } } catch (e) { }
                 } catch (e) { }
                 try { (gameContext.editorStop as any)(); } catch (e) { }
                 gameContext.editorStop = null;

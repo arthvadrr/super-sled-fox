@@ -93,6 +93,16 @@ export interface GameContext {
   noisePattern: CanvasPattern | null;
   woodPattern?: CanvasPattern | null;
 
+  // boost/stamina: normalized 0..1, refill-block timer when fully depleted
+  boostStamina: number;
+  boostRefillBlockedTimer: number;
+  // boost UI / lock state
+  boostLocked: boolean;
+  boostFullVisibleTimer: number;
+  boostBlinkTimer: number;
+  boostBlinkOn: boolean;
+  isBoosting: boolean;
+
   accumulator: number;
   lastTime: number;
 }
