@@ -219,7 +219,9 @@ export default function Game() {
       gameContext.lastGroundY = null;
       gameContext.currPlayer.invulnTimer = 1.0; // grant a short invulnerability window after respawn
       gameContext.prevPlayer = { ...gameContext.currPlayer };
-      gameContext.currCam.x = gameContext.currPlayer.x;
+      // Initial camera placement uses a horizontal bias so the player is
+      // positioned slightly left-of-center for better forward visibility.
+      gameContext.currCam.x = gameContext.currPlayer.x + (CAMERA_SETTINGS.HORIZONTAL_BIAS || 0);
       gameContext.currCam.y = gameContext.currPlayer.y;
       gameContext.prevCam = { ...gameContext.currCam };
       // resume play
@@ -251,7 +253,8 @@ export default function Game() {
       // Camera follows player with look-ahead and smoothing, clamped to level bounds
       const levelWidth = (gameContext.currentLevel.meta && gameContext.currentLevel.meta.width) || (gameContext.currentLevel.segments && gameContext.currentLevel.segments.length) || VIRTUAL_WIDTH;
       const look = Math.max(-CAMERA_SETTINGS.MAX_LOOK_AHEAD, Math.min(CAMERA_SETTINGS.MAX_LOOK_AHEAD, gameContext.currPlayer.vx * CAMERA_SETTINGS.LOOK_AHEAD_MULT));
-      const targetCamX = gameContext.currPlayer.x + look;
+      const bias = CAMERA_SETTINGS.HORIZONTAL_BIAS || 0;
+      const targetCamX = gameContext.currPlayer.x + look + bias;
       // Smooth toward target (frame-rate independent)
       const t = Math.min(1, CAMERA_SETTINGS.SMOOTH * dt);
       gameContext.currCam.x += (targetCamX - gameContext.currCam.x) * t;

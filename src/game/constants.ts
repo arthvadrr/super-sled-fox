@@ -15,6 +15,8 @@ export const CAMERA_SETTINGS = {
   LOOK_AHEAD_MULT: 0.5,
   MAX_LOOK_AHEAD: 60,
   SMOOTH: 8,
+  // horizontal camera bias in world units: positive pans camera right (player appears more left)
+  HORIZONTAL_BIAS: 72,
 };
 
 export const RENDER_SETTINGS = {
