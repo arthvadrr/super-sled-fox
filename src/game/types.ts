@@ -77,6 +77,17 @@ export interface GameContext {
   lastCheckpointX: number;
   reachedFinish: boolean;
   deathTimer: number;
+  // avalanche state: current leading X position and configured speed
+  avalancheX?: number;
+  avalancheSpeed?: number;
+  avalancheActive?: boolean;
+  avalancheEmitTimer?: number;
+  avalancheClumpTimer?: number;
+  // saved avalanche position/speed when player crashes (non-avalanche)
+  savedAvalancheX?: number;
+  savedAvalancheSpeed?: number;
+  // when true, respawn should ignore checkpoints and restart at level start
+  forceFullRestart?: boolean;
 
   snowPattern: CanvasPattern | null;
   noisePattern: CanvasPattern | null;

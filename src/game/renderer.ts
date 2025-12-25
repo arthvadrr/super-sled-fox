@@ -90,6 +90,60 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   const leftIdx = Math.max(0, Math.floor(leftWorld) - PADDING);
   const rightIdx = Math.min((currentLevel.segments && currentLevel.segments.length - 1) || 0, Math.ceil(rightWorld) + PADDING);
 
+  // Avalanche wall (render behind terrain): draw a mostly-opaque white band
+  // from the left edge to the avalanche leading edge so it appears behind
+  // the ground polygon drawn later. This keeps the avalanche visually
+  // present but the terrain sits on top of it.
+  try {
+    if (typeof (ctx as any).avalancheX === 'number') {
+      const avalX = (ctx as any).avalancheX as number;
+      const leftWorldVis = leftWorld;
+      const rightClamp = Math.min(avalX, camXUsed + viewWorldW / 2 + 10);
+      if (rightClamp > leftWorldVis) {
+        const SPILL_LEFT = 40;
+        const SPILL_RIGHT = 16;
+        let sxL = isEditor ? wxToS(leftWorldVis) : leftWorldVis - camOffsetX;
+        let sxR = isEditor ? wxToS(rightClamp) : rightClamp - camOffsetX;
+        sxL = Math.floor(sxL - SPILL_LEFT);
+        sxR = Math.ceil(sxR + SPILL_RIGHT);
+        const widthPx = Math.max(2, Math.round(sxR - sxL));
+
+        vctx.save();
+        try {
+          const bandTop = 0;
+          const bandH = Math.round(VIRTUAL_HEIGHT);
+          vctx.beginPath();
+          vctx.rect(sxL, bandTop, widthPx, bandH);
+          vctx.clip();
+
+          const BASE_OPACITY = 0.94;
+          vctx.fillStyle = `rgba(255,255,255,${BASE_OPACITY})`;
+          vctx.fillRect(sxL, bandTop, widthPx, bandH);
+
+          const FRONT_SOFT_PX = 64;
+          const gradX0 = Math.max(sxL, sxR - FRONT_SOFT_PX - 2);
+          const gradX1 = sxR + 8;
+          const g = vctx.createLinearGradient(gradX0, 0, gradX1, 0);
+          g.addColorStop(0, `rgba(255,255,255,${BASE_OPACITY})`);
+          g.addColorStop(1, `rgba(255,255,255,0.0)`);
+          vctx.fillStyle = g;
+          vctx.fillRect(gradX0, bandTop, Math.max(1, gradX1 - gradX0), bandH);
+
+          if (snowPattern) {
+            vctx.globalAlpha = 0.06;
+            try {
+              (snowPattern as any).setTransform?.(new DOMMatrix().translate(-camOffsetX, 0));
+            } catch (e) {}
+            vctx.fillStyle = snowPattern as any;
+            vctx.fillRect(sxL, bandTop, widthPx, bandH);
+            vctx.globalAlpha = 1;
+          }
+        } catch (e) {}
+        vctx.restore();
+      }
+    }
+  } catch (e) {}
+
   // draw terrain (filled polygon) only in visible range
   let groundFill: CanvasPattern | CanvasGradient | string = '#e6f7ff';
   try {
@@ -443,7 +497,6 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     }
   }
 
-  // Draw player
   vctx.save();
   const psx = isEditor ? wxToS(ix) : ix - camOffsetX;
   const psy = isEditor ? wyToS(iy) : iy - camOffsetY + shakeY;
@@ -542,6 +595,64 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.fillStyle = `rgba(255,255,255,${landingFlash * 0.5})`;
       vctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     }
+
+    // Top overlay: checkpoint/status indicators (only when level has checkpoints)
+    try {
+      const objs = (currentLevel && currentLevel.objects) || [];
+      const cps = objs.filter((o: any) => o.type === 'checkpoint');
+      if (cps.length > 0) {
+        const MARGIN = 12;
+        const barX = MARGIN;
+        const barY = 6;
+        const barW = VIRTUAL_WIDTH - MARGIN * 2;
+        const barH = 18;
+
+        // no background band: flags render directly on top of view
+
+        // draw flags in a compact row centered at the top
+        const flagW = 8;
+        const flagH = 6;
+        const poleW = 2;
+        const poleH = 8;
+        const gap = 4; // pixels between flags
+        const totalW = cps.length * (flagW + poleW + gap);
+        const startX = Math.round((VIRTUAL_WIDTH - totalW) / 2) + Math.round(poleW / 2);
+        const sy = 8 + Math.round(poleH / 2);
+        for (let i = 0; i < cps.length; i++) {
+          const cp = cps[i] as any;
+          const sx = startX + i * (flagW + poleW + gap);
+
+          // determine state
+          const reached = typeof ctx.lastCheckpointX === 'number' && (ctx.lastCheckpointX || 0) >= (cp.x || 0);
+          const avalPast = typeof (ctx as any).avalancheX === 'number' && (ctx as any).avalancheX > (cp.x || 0);
+
+          vctx.save();
+          // inactive = mostly transparent
+          if (!reached && !avalPast) vctx.globalAlpha = 0.25;
+
+          // draw pole
+          vctx.fillStyle = (ctx as any).woodPattern || '#5a3414';
+          vctx.fillRect(sx - Math.floor(poleW / 2), sy - poleH, poleW, poleH);
+
+          // choose flag color: reached->light orange, not reached->orange, avalanche past->red
+          let flagColor = '#ff8c00';
+          if (reached) flagColor = '#ffd27f';
+          if (avalPast) flagColor = '#ff4444';
+
+          // draw triangular flag (small)
+          const fx0 = sx + Math.round(poleW / 2) + 1;
+          const fy0 = sy - poleH + 1;
+          vctx.fillStyle = flagColor;
+          vctx.beginPath();
+          vctx.moveTo(fx0, fy0);
+          vctx.lineTo(fx0 + flagW, fy0 + Math.round(flagH / 2));
+          vctx.lineTo(fx0, fy0 + flagH);
+          vctx.closePath();
+          vctx.fill();
+          vctx.restore();
+        }
+      }
+    } catch (e) {}
 
     if (restartHintTimer > 0) {
       vctx.fillStyle = `rgba(255,255,255,${Math.min(1, restartHintTimer)})`;

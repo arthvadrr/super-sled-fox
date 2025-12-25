@@ -290,10 +290,10 @@ export function startEditor(opts: StartOpts) {
       return;
     }
 
-      // allow quick-edit of a selected sign via double-click (open prompt)
-      if (currentTool === Tool.Select && draggingObjectIndex !== null && level.objects[draggingObjectIndex]?.type === 'sign') {
-        // handled elsewhere on pointerup; no-op here
-      }
+    // allow quick-edit of a selected sign via double-click (open prompt)
+    if (currentTool === Tool.Select && draggingObjectIndex !== null && level.objects[draggingObjectIndex]?.type === 'sign') {
+      // handled elsewhere on pointerup; no-op here
+    }
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -338,21 +338,20 @@ export function startEditor(opts: StartOpts) {
             const lines: string[] = [];
             for (let li = 0; li < 3; li++) {
               const existing = old[li] || '';
-                const resp = window.prompt(`Edit sign line ${li + 1} (max 10 chars, leave blank to keep)`, existing);
-                if (resp === null) {
-                  // cancelled — keep remaining lines
-                  lines.push(existing);
-                  continue;
-                }
-                lines.push(resp.slice(0, 10).toUpperCase());
+              const resp = window.prompt(`Edit sign line ${li + 1} (max 10 chars, leave blank to keep)`, existing);
+              if (resp === null) {
+                // cancelled — keep remaining lines
+                lines.push(existing);
+                continue;
+              }
+              lines.push(resp.slice(0, 10).toUpperCase());
             }
             obj.message = lines;
             scheduleOnChange();
           } catch (e) {}
         }
       }
-    }
-    else if (k === 'escape') {
+    } else if (k === 'escape') {
       selectedObjectIndex = null;
       currentTool = Tool.PaintHeight;
     } else if (k === 'delete' || k === 'backspace') {

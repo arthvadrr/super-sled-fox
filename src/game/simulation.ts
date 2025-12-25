@@ -1,7 +1,7 @@
-import { PHYS_CONSTANTS, JUMP_SETTINGS, FIXED_DT } from './constants';
+import { PHYS_CONSTANTS, JUMP_SETTINGS, FIXED_DT, VIRTUAL_HEIGHT } from './constants';
 import { GameContext } from './types';
 import { getHeightAtX, getSlopeAtX } from '../heightmap';
-import { PHYS } from '../player';
+import { PHYS, PLAYER_DEFAULTS } from '../player';
 import { InputManager } from '../input';
 
 const { SLOPE_DOWN_SCALE, SLOPE_UP_SCALE, MAX_SLOPE, MOTOR_K, MOTOR_MAX, HALF_WIDTH } = PHYS_CONSTANTS;
@@ -39,6 +39,29 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
 
   // distance from player's origin to feet (must match renderer/respawn)
   const FEET_OFFSET = 8;
+
+  // Helper: when a non-avalanche crash occurs, decide whether to force a
+  // full-level restart (if no checkpoint or avalanche passed the last
+  // checkpoint) or save the avalanche position so it can resume after
+  // respawning at the checkpoint.
+  const handleAvalancheOnCrash = (ctxLocal: GameContext) => {
+    try {
+      if (typeof ctxLocal.avalancheX === 'number') {
+        const startX = ctxLocal.lastCheckpointX ?? PLAYER_DEFAULTS.startX;
+        const hadCheckpoint = (ctxLocal.lastCheckpointX ?? PLAYER_DEFAULTS.startX) > PLAYER_DEFAULTS.startX;
+        if (!hadCheckpoint) {
+          ctxLocal.forceFullRestart = true;
+        } else if ((ctxLocal.avalancheX || 0) > (ctxLocal.lastCheckpointX || PLAYER_DEFAULTS.startX)) {
+          // avalanche is past the player's checkpoint — force full restart
+          ctxLocal.forceFullRestart = true;
+        } else {
+          // save avalanche position/speed so it can be restored after respawn
+          ctxLocal.savedAvalancheX = ctxLocal.avalancheX;
+          if (typeof ctxLocal.avalancheSpeed === 'number') ctxLocal.savedAvalancheSpeed = ctxLocal.avalancheSpeed;
+        }
+      }
+    } catch (e) {}
+  };
 
   // decay jump lock
   ctx.jumpLock = Math.max(0, ctx.jumpLock - dt);
@@ -391,6 +414,10 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         if (!verticalOverlap) continue;
 
         if (descending || feetOk) {
+          // handle avalanche interaction with this crash
+          try {
+            handleAvalancheOnCrash(ctx);
+          } catch (e) {}
           ctx.state = 'dead';
           ctx.crashFade = 0.6;
           ctx.crashTimer = 0.9;
@@ -496,6 +523,9 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
 
             // If feet are at/below the solid surface, this is a fatal impact.
             if (playerFeetY >= solidH - 6) {
+              try {
+                handleAvalancheOnCrash(ctx);
+              } catch (e) {}
               ctx.state = 'dead';
               ctx.crashFade = 0.6;
               ctx.crashTimer = 0.9;
@@ -564,6 +594,9 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         if (!ctx.reachedFinish && currPlayer.invulnTimer <= 0) {
           // crash
           if (ctx.state !== 'dead') {
+            try {
+              handleAvalancheOnCrash(ctx);
+            } catch (e) {}
             ctx.state = 'dead';
             ctx.crashFade = 0.6;
             ctx.crashTimer = 0.9;
@@ -617,12 +650,130 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     }
   }
 
+  // Avalanche logic: advance a left-originating sheet across the level
+  try {
+    const meta = (currentLevel && (currentLevel.meta as any)) || {};
+    const avalSpeed = typeof meta.avalancheSpeed === 'number' ? meta.avalancheSpeed : 0;
+    if (avalSpeed > 0) {
+      // initialize avalanche position just before the level's start when first seen
+      if (typeof ctx.avalancheX !== 'number') {
+        const startObj = currentLevel && currentLevel.objects ? (currentLevel.objects as any[]).find((o) => o.type === 'start') : undefined;
+        const startX = typeof startObj?.x === 'number' ? startObj.x : ctx.currPlayer.x || 0;
+        const START_OFFSET = 120; // start a bit to the left of the start marker
+        ctx.avalancheX = startX - START_OFFSET;
+        ctx.avalancheSpeed = avalSpeed;
+        ctx.avalancheActive = true;
+      }
+      // keep speed in sync with level meta
+      ctx.avalancheSpeed = avalSpeed;
+      // advance avalanche leading edge
+      const speed = typeof ctx.avalancheSpeed === 'number' ? ctx.avalancheSpeed : avalSpeed;
+      const prevAvalX = typeof ctx.avalancheX === 'number' ? ctx.avalancheX : undefined;
+      ctx.avalancheX = (ctx.avalancheX || 0) + speed * dt;
+
+      // SIMPLE EMITTER MODEL: 4 emitters along the front that throw large, slow chunks.
+      try {
+        if (ctx.effects && ctx.effects.particles) {
+          ctx.avalancheEmitTimer = Math.max(0, (ctx.avalancheEmitTimer || 0) - dt);
+          if ((ctx.avalancheEmitTimer || 0) <= 0) {
+            // trigger emitters ~3 times/sec (configurable to 2-4/sec)
+            ctx.avalancheEmitTimer = 0.33;
+            const frontX = ctx.avalancheX || 0;
+            const levelH = (currentLevel && (currentLevel.meta as any).virtualHeight) || (globalThis as any).VIRTUAL_HEIGHT || VIRTUAL_HEIGHT || 225;
+            // emitter horizontal offsets (world units) behind the leading edge
+            const emitterOffsets = [8, 18, 30, 44];
+            // vertical screen fractions: emitters spread evenly on player's screen Y axis
+            const screenFracs = [0.22, 0.42, 0.62, 0.82];
+            // compute camera-derived topWorld so emitters stick to screen Y positions
+            const camY = ctx.currCam && typeof ctx.currCam.y === 'number' ? ctx.currCam.y : ctx.currPlayer.y || 0;
+            const viewWorldH = VIRTUAL_HEIGHT; // virtual canvas height in world units
+            const topWorld = camY - viewWorldH / 2;
+            // particle cap: skip heavy emits if too many particles already
+            const PARTICLE_CAP = 2200;
+            const currentParticles = ctx.effects.particles.particles.length;
+            for (let ei = 0; ei < emitterOffsets.length; ei++) {
+              // X anchored roughly to the avalanche front (slightly behind)
+              const exBase = frontX - emitterOffsets[ei] + (Math.random() - 0.5) * 6;
+              // Y fixed to screen fraction -> world Y so emitters remain at same
+              // screen vertical positions as the camera moves.
+              const frac = screenFracs[ei] ?? 0.5;
+              let eyBase = topWorld + frac * viewWorldH + (Math.random() - 0.5) * 8;
+              // If terrain at emitter X is significantly above the chosen screen Y,
+              // nudge the emitter up toward the terrain so chunks feel grounded.
+              try {
+                const terrainY = getHeightAtX(currentLevel as any, Math.round(exBase));
+                if (terrainY !== null && terrainY - 12 < eyBase) {
+                  // prefer to originate a little above terrain when terrain is visible
+                  eyBase = Math.min(eyBase, (terrainY as number) - 6 + (Math.random() - 0.5) * 6);
+                }
+              } catch (e) {}
+              try {
+                // skip heavy emission if particles are already high
+                if (currentParticles > PARTICLE_CAP) continue;
+                // emit a few very large, slow chunks from each emitter (2-3 chunks)
+                const chunkCount = 1 + Math.floor(Math.random() * 3); // 1-3
+                for (let c = 0; c < chunkCount; c++) {
+                  const size = 48 + Math.random() * 16; // 48-64 px
+                  ctx.effects.particles.emitDirectional(exBase + (Math.random() - 0.5) * 24, eyBase + (Math.random() - 0.5) * 28, 1, {
+                    angle: Math.PI + (Math.random() - 0.5) * 0.45, // mostly left
+                    spread: 0.6 + Math.random() * 1.4,
+                    speed: 8 + Math.random() * 48,
+                    size,
+                    color: '#fbfdff',
+                    ttl: 2.0 + Math.random() * 2.6,
+                  });
+                }
+
+                // churn: emit a cluster of short-lived small snow particles to give motion
+                const churnCount = 6 + Math.floor(Math.random() * 8);
+                ctx.effects.particles.emitDirectional(exBase, eyBase - 6, churnCount, {
+                  angle: Math.PI + -0.1 + (Math.random() - 0.5) * 0.6,
+                  spread: 1.8,
+                  speed: 40 + Math.random() * 80,
+                  size: 1 + Math.random() * 2,
+                  color: 'rgba(255,255,255,0.96)',
+                  ttl: 0.5 + Math.random() * 0.8,
+                });
+              } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {}
+
+      // collision: if player's x is behind the avalanche leading edge, they are caught
+      const AVAL_WIDTH = 12; // thickness of avalanche leading edge
+      if (!ctx.reachedFinish && ctx.state !== 'dead' && (ctx.currPlayer.x || 0) <= (ctx.avalancheX || 0) + AVAL_WIDTH) {
+        // force a full-level restart (ignore checkpoints)
+        ctx.forceFullRestart = true;
+        ctx.state = 'dead';
+        ctx.crashFade = 0.6;
+        ctx.crashTimer = 0.9;
+        ctx.crashFlash = 0.6;
+        try {
+          void ctx.sfxDeath?.play?.();
+        } catch (e) {}
+        try {
+          ctx.effects.shake.shake(12);
+        } catch (e) {}
+        try {
+          ctx.effects.onCrash(ctx.currPlayer.x, ctx.currPlayer.y + 8, ctx.currPlayer.vx, ctx.currPlayer.vy);
+        } catch (e) {}
+        try {
+          ctx.playerEntity = null;
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+
   // bounds check - don't trigger death if we've already reached the finish
   // Use level meta virtualHeight when available so taller levels don't prematurely trigger a crash.
   const levelHeight = (currentLevel && (currentLevel.meta as any)?.virtualHeight) || (globalThis as any).VIRTUAL_HEIGHT || 225;
   const crashThreshold = Math.max(600, levelHeight + ((globalThis as any).VIRTUAL_HEIGHT || 225));
   if (currPlayer.y > crashThreshold && !ctx.reachedFinish) {
     if (ctx.state !== 'dead') {
+      try {
+        handleAvalancheOnCrash(ctx);
+      } catch (e) {}
       ctx.state = 'dead';
       ctx.crashFade = 0.6;
       ctx.crashTimer = 0.9;

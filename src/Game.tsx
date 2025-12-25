@@ -155,7 +155,56 @@ export default function Game() {
     });
 
     function respawn() {
-      const rx = gameContext.lastCheckpointX ?? PLAYER_DEFAULTS.startX;
+      const hadFullRestart = gameContext.forceFullRestart === true;
+      const rx = hadFullRestart ? PLAYER_DEFAULTS.startX : (gameContext.lastCheckpointX ?? PLAYER_DEFAULTS.startX);
+      // clear full-restart flag after using it
+      gameContext.forceFullRestart = false;
+      // reset or restore avalanche position when respawning depending on whether
+      // we performed a full restart or have a saved avalanche position and a
+      // valid checkpoint.
+      try {
+        const meta = (gameContext.currentLevel && (gameContext.currentLevel.meta as any)) || {};
+        const avalSpeed = typeof meta.avalancheSpeed === 'number' ? meta.avalancheSpeed : 0;
+        if (avalSpeed > 0) {
+          const startObj = (gameContext.currentLevel && (gameContext.currentLevel.objects || []) as any[])
+            ? (gameContext.currentLevel.objects as any[]).find((o) => o.type === 'start')
+            : undefined;
+          const startX = typeof startObj?.x === 'number' ? startObj.x : rx;
+          const START_OFFSET = 120;
+
+          const cpX = gameContext.lastCheckpointX ?? PLAYER_DEFAULTS.startX;
+          const hasNonStartCheckpoint = cpX > PLAYER_DEFAULTS.startX;
+
+          if (hadFullRestart || !hasNonStartCheckpoint) {
+            // full restart or no checkpoint reached -> reset avalanche to beginning
+            gameContext.avalancheX = startX - START_OFFSET;
+            gameContext.avalancheSpeed = avalSpeed;
+            gameContext.avalancheActive = true;
+            // clear any saved values
+            gameContext.savedAvalancheX = undefined;
+            gameContext.savedAvalancheSpeed = undefined;
+          } else if (typeof gameContext.savedAvalancheX === 'number' && gameContext.savedAvalancheX <= cpX) {
+            // resume avalanche from saved position (it was behind the player's checkpoint)
+            gameContext.avalancheX = gameContext.savedAvalancheX;
+            gameContext.avalancheSpeed = gameContext.savedAvalancheSpeed ?? avalSpeed;
+            gameContext.avalancheActive = true;
+            // consume saved values
+            gameContext.savedAvalancheX = undefined;
+            gameContext.savedAvalancheSpeed = undefined;
+          } else {
+            // default: reset to start
+            gameContext.avalancheX = startX - START_OFFSET;
+            gameContext.avalancheSpeed = avalSpeed;
+            gameContext.avalancheActive = true;
+            gameContext.savedAvalancheX = undefined;
+            gameContext.savedAvalancheSpeed = undefined;
+          }
+        } else {
+          gameContext.avalancheX = undefined;
+          gameContext.avalancheActive = false;
+          gameContext.avalancheSpeed = undefined;
+        }
+      } catch (e) { }
       gameContext.currPlayer.x = rx;
       const hy = getHeightAtX(gameContext.currentLevel as any, rx);
       // place player slightly above ground so feet sit on the surface rather than inside it
@@ -515,6 +564,45 @@ export default function Game() {
                 heightLabel.appendChild(setHeightBtn);
                 document.body.appendChild(heightLabel);
 
+                // --- Avalanche speed UI ---
+                const avalancheLabel = document.createElement('label');
+                avalancheLabel.style.position = 'fixed';
+                avalancheLabel.style.right = '680px';
+                avalancheLabel.style.bottom = '12px';
+                avalancheLabel.style.zIndex = '9999';
+                avalancheLabel.style.color = '#fff';
+                avalancheLabel.style.fontFamily = 'monospace';
+                avalancheLabel.style.fontSize = '12px';
+                avalancheLabel.style.display = 'flex';
+                avalancheLabel.style.gap = '6px';
+
+                const avalancheInput = document.createElement('input');
+                avalancheInput.type = 'number';
+                avalancheInput.min = '0';
+                avalancheInput.step = '1';
+                avalancheInput.value = String((currentLevel.meta && (currentLevel.meta as any).avalancheSpeed) || 0);
+                avalancheInput.style.width = '64px';
+                avalancheInput.style.padding = '4px';
+                avalancheInput.style.background = '#222';
+                avalancheInput.style.color = '#fff';
+                avalancheInput.style.border = '1px solid #444';
+
+                const setAvalBtn = document.createElement('button');
+                setAvalBtn.textContent = 'Set Avalanche';
+                setAvalBtn.style.padding = '6px 8px';
+                setAvalBtn.style.background = '#222';
+                setAvalBtn.style.color = '#fff';
+
+                avalancheLabel.appendChild(avalancheInput);
+                avalancheLabel.appendChild(setAvalBtn);
+                document.body.appendChild(avalancheLabel);
+
+                setAvalBtn.onclick = () => {
+                  const v = Math.max(0, Number(avalancheInput.value) || 0);
+                  if (!currentLevel.meta) currentLevel.meta = {} as any;
+                  (currentLevel.meta as any).avalancheSpeed = v;
+                };
+
                 // --- Smooth UI ---
                 const smoothLabel = document.createElement('label');
                 smoothLabel.style.position = 'fixed';
@@ -668,7 +756,7 @@ export default function Game() {
                 window.addEventListener('dragover', onDragOver);
 
                 // attach to editor handlers for cleanup
-                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput };
+                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -783,6 +871,9 @@ export default function Game() {
                     try { nodes.widthLabel.remove(); } catch (e) { }
                     try { nodes.heightLabel.remove(); } catch (e) { }
                     try { nodes.smoothLabel.remove(); } catch (e) { }
+                    try { nodes.avalancheLabel && nodes.avalancheLabel.remove(); } catch (e) { }
+                    try { nodes.setAvalBtn && nodes.setAvalBtn.remove(); } catch (e) { }
+                    try { nodes.avalancheInput && nodes.avalancheInput.remove(); } catch (e) { }
                     try { window.removeEventListener('drop', nodes.onDrop); } catch (e) { }
                     try { window.removeEventListener('dragover', nodes.onDragOver); } catch (e) { }
                   }

@@ -35,12 +35,7 @@ export class ParticleSystem {
     }
   }
 
-  emitDirectional(
-    x: number,
-    y: number,
-    count = 6,
-    opts: { angle?: number; spread?: number; speed?: number; size?: number; color?: string; ttl?: number } = {}
-  ) {
+  emitDirectional(x: number, y: number, count = 6, opts: { angle?: number; spread?: number; speed?: number; size?: number; color?: string; ttl?: number } = {}) {
     if (!this.enabled) return;
     const angleBase = opts.angle ?? Math.PI * 0.5; // default up
     const spread = opts.spread ?? 0.9; // radians
