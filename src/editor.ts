@@ -32,6 +32,7 @@ export function startEditor(opts: StartOpts) {
     PlaceFinish = 'PlaceFinish',
     PlaceWall = 'PlaceWall',
     Select = 'Select',
+    PlaceSign = 'PlaceSign',
     Delete = 'Delete',
   }
 
@@ -169,6 +170,26 @@ export function startEditor(opts: StartOpts) {
       scheduleOnChange();
       return;
     }
+    if (currentTool === Tool.PlaceSign) {
+      // place a sign and prompt for up to 3 lines (10 chars each)
+      if (!Array.isArray(level.objects)) level.objects = [] as any;
+      const defaultMsg = ['', '', ''];
+      level.objects.push({ type: 'sign', x: idx, message: defaultMsg } as any);
+      selectedObjectIndex = level.objects.length - 1;
+      // prompt for lines sequentially
+      try {
+        const lines: string[] = [];
+        for (let li = 0; li < 3; li++) {
+          const promptText = `Sign line ${li + 1} (max 10 chars, leave blank to skip)`;
+          const resp = window.prompt(promptText, '');
+          if (!resp) break;
+          lines.push(resp.slice(0, 10).toUpperCase());
+        }
+        if (lines.length > 0) level.objects[selectedObjectIndex].message = lines;
+      } catch (e) {}
+      scheduleOnChange();
+      return;
+    }
 
     if (currentTool === Tool.PlaceWall) {
       // toggle wall at this index
@@ -268,6 +289,11 @@ export function startEditor(opts: StartOpts) {
       scheduleOnChange();
       return;
     }
+
+      // allow quick-edit of a selected sign via double-click (open prompt)
+      if (currentTool === Tool.Select && draggingObjectIndex !== null && level.objects[draggingObjectIndex]?.type === 'sign') {
+        // handled elsewhere on pointerup; no-op here
+      }
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -300,13 +326,38 @@ export function startEditor(opts: StartOpts) {
     else if (k === '4') currentTool = Tool.PlaceStart;
     else if (k === '5') currentTool = Tool.PlaceFinish;
     else if (k === 'v' || k === '0') currentTool = Tool.Select;
+    else if (k === '8') currentTool = Tool.PlaceSign;
     else if (k === '7') currentTool = Tool.Delete;
+    else if (k === 'e') {
+      // edit selected object (sign text)
+      if (selectedObjectIndex !== null) {
+        const obj = level.objects[selectedObjectIndex];
+        if (obj && obj.type === 'sign') {
+          try {
+            const old = obj.message || [];
+            const lines: string[] = [];
+            for (let li = 0; li < 3; li++) {
+              const existing = old[li] || '';
+                const resp = window.prompt(`Edit sign line ${li + 1} (max 10 chars, leave blank to keep)`, existing);
+                if (resp === null) {
+                  // cancelled — keep remaining lines
+                  lines.push(existing);
+                  continue;
+                }
+                lines.push(resp.slice(0, 10).toUpperCase());
+            }
+            obj.message = lines;
+            scheduleOnChange();
+          } catch (e) {}
+        }
+      }
+    }
     else if (k === 'escape') {
       selectedObjectIndex = null;
       currentTool = Tool.PaintHeight;
     } else if (k === 'delete' || k === 'backspace') {
       if (selectedObjectIndex !== null) {
-        // delete currently selected object (allow deletion of start/finish as well)
+        // delete currently selected object
         level.objects.splice(selectedObjectIndex, 1);
         selectedObjectIndex = null;
         scheduleOnChange();

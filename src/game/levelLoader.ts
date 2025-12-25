@@ -5,7 +5,6 @@ import { loadParallaxLayers } from '../parallax';
 import { GameContext } from './types';
 import { LEVELS } from '../levels';
 import { PLAYER_DEFAULTS } from '../player';
-import { getHeightAtX, getSlopeAtX } from '../heightmap';
 
 export async function loadLevelAssets(ctx: GameContext) {
   try {
