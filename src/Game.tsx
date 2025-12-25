@@ -20,7 +20,7 @@ import {
   GameContext,
   Camera
 } from './game/types';
-import { createSnowPattern, createNoisePattern } from './game/patterns';
+import { createSnowPattern, createNoisePattern, createWoodPattern } from './game/patterns';
 import { simulate } from './game/simulation';
 import { draw } from './game/renderer';
 import { loadLevelAssets, loadLevelByIndex } from './game/levelLoader';
@@ -71,6 +71,7 @@ export default function Game() {
     // Create visual texture patterns using extracted functions
     const snowPattern = createSnowPattern(vctx);
     const noisePattern = createNoisePattern(vctx);
+    const woodPattern = createWoodPattern(vctx);
 
     // Initialize player and camera
     const initialPlayer: Player = createPlayer();
@@ -97,6 +98,7 @@ export default function Game() {
       lastAccelScaled: 0,
 
       landingFlash: 0,
+      crashFlash: 0,
       crashFade: 0,
       crashTimer: 0,
       restartHintTimer: 0,
@@ -138,6 +140,7 @@ export default function Game() {
 
       snowPattern,
       noisePattern,
+      woodPattern,
 
       accumulator: 0,
       lastTime: performance.now()
@@ -171,6 +174,10 @@ export default function Game() {
       gameContext.currCam.y = gameContext.currPlayer.y;
       gameContext.prevCam = { ...gameContext.currCam };
       // resume play
+      // restore player sprite if it was removed by explosion
+      try {
+        if (!gameContext.playerEntity) gameContext.playerEntity = (gameContext as any).playerEntityTemplate ?? null;
+      } catch (e) { }
       gameContext.state = 'playing';
       stateRef.current = 'playing';
       gameContext.reachedFinish = false;
@@ -272,6 +279,10 @@ export default function Game() {
         if (gameContext.crashTimer > 0) {
           gameContext.crashTimer -= delta;
           gameContext.crashFade = Math.max(0, gameContext.crashFade - delta);
+          try {
+            // keep effects (particles / screen shake) updating so crash explosion animates
+            gameContext.effects.update(delta);
+          } catch (e) { }
         } else {
           // no auto-respawn; wait for user to press `R` to respawn
         }

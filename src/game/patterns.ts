@@ -32,6 +32,45 @@ export function createSnowPattern(ctx: CanvasRenderingContext2D): CanvasPattern 
   }
 }
 
+export function createWoodPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const pc = c.getContext('2d')!;
+    // base wood color
+    pc.fillStyle = '#6b3f1a';
+    pc.fillRect(0, 0, c.width, c.height);
+    // lighter streaks for grain
+    for (let x = -16; x < c.width + 16; x += 6) {
+      pc.beginPath();
+      pc.moveTo(x + (Math.random() - 0.5) * 4, -8);
+      pc.quadraticCurveTo(x + 6, c.height / 2 + (Math.random() - 0.5) * 6, x + (Math.random() - 0.5) * 4, c.height + 8);
+      pc.strokeStyle = `rgba(180,120,70,${0.06 + Math.random() * 0.12})`;
+      pc.lineWidth = 2 + Math.random() * 2;
+      pc.stroke();
+    }
+    // some knots
+    for (let i = 0; i < 8; i++) {
+      const rx = Math.random() * c.width;
+      const ry = Math.random() * c.height;
+      const rw = 3 + Math.random() * 8;
+      pc.beginPath();
+      pc.ellipse(rx, ry, rw, rw * (0.6 + Math.random() * 0.8), Math.random() * Math.PI, 0, Math.PI * 2);
+      pc.fillStyle = `rgba(40,20,10,${0.12 + Math.random() * 0.18})`;
+      pc.fill();
+    }
+    // subtle highlights
+    pc.globalCompositeOperation = 'lighter';
+    pc.fillStyle = 'rgba(255,230,200,0.02)';
+    pc.fillRect(0, 0, c.width, c.height);
+    pc.globalCompositeOperation = 'source-over';
+    return ctx.createPattern(c, 'repeat');
+  } catch (e) {
+    return null;
+  }
+}
+
 export function createNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
   try {
     const ncan = document.createElement('canvas');

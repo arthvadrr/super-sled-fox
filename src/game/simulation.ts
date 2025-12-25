@@ -32,6 +32,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   ctx.coyoteTimer = Math.max(0, ctx.coyoteTimer - dt);
   ctx.jumpBuffer = Math.max(0, ctx.jumpBuffer - dt);
   ctx.jumpHold = Math.max(0, ctx.jumpHold - dt);
+  ctx.jumpAppliedThisFrame = false;
 
   // decrement invulnerability timer
   currPlayer.invulnTimer = Math.max(0, (currPlayer.invulnTimer || 0) - dt);
@@ -84,6 +85,8 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     currPlayer.vy = 0;
     currPlayer.grounded = true;
     currPlayer.angle = Math.atan2((hf as number) - (hb as number), frontX - backX);
+    // Refresh coyote time while grounded so buffered jumps can fire.
+    ctx.coyoteTimer = COYOTE_TIME;
 
     // input speed modifiers and braking — read input early so we can respect braking intent
     const forward = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
@@ -91,6 +94,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     let speedMul = 1.0;
     if (forward) speedMul = 1.5;
     else if (back) speedMul = 0.5;
+    const targetSpeed = PHYS.BASE_CRUISE_SPEED * speedMul;
 
     // grounded motion: acceleration along slope from gravity projection
     const slope = getSlopeAtX(currentLevel as any, currPlayer.x) ?? Math.tan(currPlayer.angle);
@@ -105,15 +109,10 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     if (back && accelScaled > 0) accelScaled = 0;
     ctx.lastAccelRaw = accelRaw;
     ctx.lastAccelScaled = accelScaled;
-
-    // target cruise speed modified by input
-    const targetSpeed = PHYS.BASE_CRUISE_SPEED * speedMul;
-
     // forward motor assist (grounded only)
     let motorAccel = 0;
     if (forward && !back) {
       motorAccel = Math.max(0, Math.min(MOTOR_MAX, (targetSpeed - currPlayer.vx) * MOTOR_K));
-      // Log if forward is pressed but motorAssist produces zero or tiny applied acceleration
       try {
         const now = performance.now();
         const lastFwdLog = (window as any).__lastFwdAssistLog || 0;
@@ -133,7 +132,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
       const maxDelta = Math.max(0, targetSpeed - currPlayer.vx);
       const applied = Math.min(motorAccel * dt, maxDelta);
       currPlayer.vx += applied;
-      // If applied is zero while targetSpeed > currPlayer.vx, log for diagnosis.
       try {
         if (applied <= 0 && targetSpeed > currPlayer.vx + 0.001) {
           // eslint-disable-next-line no-console
@@ -190,9 +188,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
           dt,
         });
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
 
     // braking: when back is held, reduce speed magnitude toward zero (never reverse direction)
     if (back) {
@@ -257,7 +253,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
           if (moving) {
             if (forward && !back) {
               ctx.effects.onSpeed(frontX, feetY, currPlayer.vx);
-              // boost flame/smoke from back
               try {
                 ctx.effects.onBoost(backX, feetY, currPlayer.vx);
               } catch (e) {}
@@ -268,37 +263,13 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         }
       }
     } catch (e) {}
-
-    // If 'back' is pressed but vx still increased this frame, log throttled diagnostics.
-    try {
-      const deltaV = currPlayer.vx - preVx;
-      const now = performance.now();
-      const last = (window as any).__lastBackIncLogTime || 0;
-      if (back && deltaV > 1 && now - last > 250) {
-        (window as any).__lastBackIncLogTime = now;
-        // eslint-disable-next-line no-console
-        console.warn('[debug][back-inc] vx increased while back pressed', {
-          preVx: Math.round(preVx),
-          postVx: Math.round(currPlayer.vx),
-          delta: Math.round(deltaV),
-          forward,
-          back,
-          slopeEff,
-          accelRaw: Math.round(accelRaw),
-          accelScaled: Math.round(accelScaled),
-          motorAccel,
-          targetSpeed,
-          frictionAcc: Math.round(PHYS.FRICTION * (slopeEff > 0 ? 0.12 : 0.5) * 100) / 100,
-        });
-      }
-    } catch (e) {}
-
-    ctx.coyoteTimer = COYOTE_TIME;
   } else {
     // airborne
     if (currPlayer.grounded) {
       // eslint-disable-next-line no-console
       console.log('[jump-debug] grounded set FALSE (left ground)', { t: performance.now(), hb, hf, jumpLock: ctx.jumpLock });
+      // Start coyote time when we step off the ground.
+      ctx.coyoteTimer = COYOTE_TIME;
     }
     currPlayer.grounded = false;
     ctx.lastGroundY = null;
@@ -346,6 +317,103 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   currPlayer.x += currPlayer.vx * dt;
   currPlayer.y += currPlayer.vy * dt;
 
+  // Gap-edge wall collision: must run while airborne too.
+  // Use a SWEPT test (prev -> curr) so we don't miss impacts when the player crosses the wall plane in one frame.
+  try {
+    if (!ctx.reachedFinish && ctx.state !== 'dead') {
+      const segs = (currentLevel && currentLevel.segments) || [];
+      const levelBottom = (currentLevel && (currentLevel.meta as any)?.virtualHeight) || (globalThis as any).VIRTUAL_HEIGHT || 225;
+      const FEET_OFFSET_LOCAL = FEET_OFFSET;
+      const PLAYER_BODY_H = 18;
+      const wallHalf = 0.6;
+      const crashTolerance = 6;
+
+      // Previous position BEFORE integration this frame.
+      const prevX = currPlayer.x - currPlayer.vx * dt;
+      const prevY = currPlayer.y - currPlayer.vy * dt;
+
+      // Player AABB helpers.
+      const pAabbAt = (x: number, y: number) => {
+        const left = x - HALF_WIDTH;
+        const right = x + HALF_WIDTH;
+        const bottom = y + FEET_OFFSET_LOCAL;
+        const top = bottom - PLAYER_BODY_H;
+        return { left, right, top, bottom };
+      };
+
+      const prevBox = pAabbAt(prevX, prevY);
+      const currBox = pAabbAt(currPlayer.x, currPlayer.y);
+
+      // Consider nearby edges around current position.
+      const ix = Math.floor(currPlayer.x);
+      for (let di = -3; di <= 3; di++) {
+        const i = ix + di;
+        if (i < 0 || i >= segs.length - 1) continue;
+        const leftSeg = segs[i];
+        const rightSeg = segs[i + 1];
+        const gapOnLeft = leftSeg === null && rightSeg !== null;
+        const gapOnRight = leftSeg !== null && rightSeg === null;
+        if (!gapOnLeft && !gapOnRight) continue;
+
+        const edgeX = i + 1;
+        const solidH = gapOnLeft ? (rightSeg as number) : (leftSeg as number);
+
+        // Wall AABB: vertical face at edgeX, from solid surface downwards.
+        const wLeft = edgeX - wallHalf;
+        const wRight = edgeX + wallHalf;
+        const wTop = solidH;
+        const wBottom = levelBottom;
+
+        // Only crash when the player's FEET are at/near/below the solid surface height.
+        // Also crash immediately when descending (vy >= 0) and we hit the wall face.
+        const feetOk = currBox.bottom >= wTop - crashTolerance;
+        const descending = currPlayer.vy >= 0;
+
+        // SWEPT horizontal face hit:
+        // - If the gap is on the LEFT, the player can hit the wall from the left side while moving RIGHT.
+        //   Detect crossing of the wall's LEFT plane (wLeft) by the player's RIGHT side.
+        // - If the gap is on the RIGHT, the player can hit the wall from the right side while moving LEFT.
+        //   Detect crossing of the wall's RIGHT plane (wRight) by the player's LEFT side.
+        let crossed = false;
+        if (gapOnLeft) {
+          const movedRight = currPlayer.x >= prevX - 0.0001;
+          // Crossed into the wall face this frame (or is already overlapping it).
+          crossed = (movedRight && prevBox.right <= wLeft && currBox.right >= wLeft) || (movedRight && currBox.right > wLeft && currBox.left < wRight);
+        } else if (gapOnRight) {
+          const movedLeft = currPlayer.x <= prevX + 0.0001;
+          crossed = (movedLeft && prevBox.left >= wRight && currBox.left <= wRight) || (movedLeft && currBox.right > wLeft && currBox.left < wRight);
+        }
+
+        if (!crossed) continue;
+
+        // Vertical overlap with the wall span.
+        const verticalOverlap = currBox.bottom > wTop && currBox.top < wBottom;
+        if (!verticalOverlap) continue;
+
+        if (descending || feetOk) {
+          ctx.state = 'dead';
+          ctx.crashFade = 0.6;
+          ctx.crashTimer = 0.9;
+          ctx.crashFlash = 0.6;
+          try {
+            void ctx.sfxDeath?.play?.();
+          } catch (e) {}
+          try {
+            ctx.effects.shake.shake(10);
+          } catch (e) {}
+          try {
+            ctx.effects.onCrash(currPlayer.x, currPlayer.y + FEET_OFFSET_LOCAL, currPlayer.vx, currPlayer.vy);
+          } catch (e) {}
+          try {
+            // hide the player sprite so only explosion is visible
+            ctx.playerEntity = null;
+          } catch (e) {}
+          break;
+        }
+      }
+    }
+  } catch (e) {}
+
   // Global high-velocity watchdog: log input + context when vx becomes very large.
   try {
     const HV_THRESH = 1000;
@@ -373,7 +441,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
       });
     }
   } catch (e) {}
-
   // landing detection (if we were airborne and now we are grounded or cross the ground)
   if (!currPlayer.wasGrounded) {
     const h = getHeightAtX(currentLevel as any, currPlayer.x);
@@ -396,6 +463,84 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     }
   }
 
+  // Gap-edge wall detection: check nearby segment boundaries where one side is a gap
+  // NOTE: Disabled. Wall collisions are handled in the deterministic AABB block above.
+  if (false) {
+    try {
+      const segs = (currentLevel && currentLevel.segments) || [];
+      const ix = Math.floor(currPlayer.x);
+      for (let di = -1; di <= 1; di++) {
+        const i = ix + di;
+        if (i < 0 || i >= segs.length - 1) continue;
+        const left = segs[i];
+        const right = segs[i + 1];
+        if ((left === null && right !== null) || (left !== null && right === null)) {
+          const edgeX = i + 1; // boundary between segments i and i+1
+          const dx = currPlayer.x - edgeX;
+          const within = Math.abs(dx) < 1.2; // slightly larger detection window
+          const movingInto = (dx > 0 && currPlayer.vx < -10) || (dx < 0 && currPlayer.vx > 10);
+          if (within && movingInto && !ctx.reachedFinish && ctx.state !== 'dead') {
+            // Determine solid surface height on the boundary
+            const solidH = left === null ? (right as number) : (left as number);
+            const playerFeetY = currPlayer.y + 8; // match FEET_OFFSET used for grounding
+            // Debug log for gap-edge detection
+            try {
+              const now = performance.now();
+              const last = (window as any).__lastGapWallLog || 0;
+              if (now - last > 150) {
+                (window as any).__lastGapWallLog = now;
+                // eslint-disable-next-line no-console
+                console.log('[debug][gap-wall] edge', i, 'dx', dx.toFixed(2), 'vx', Math.round(currPlayer.vx), 'feetY', Math.round(playerFeetY), 'solidH', Math.round(solidH));
+              }
+            } catch (e) {}
+
+            // If feet are at/below the solid surface, this is a fatal impact.
+            if (playerFeetY >= solidH - 6) {
+              ctx.state = 'dead';
+              ctx.crashFade = 0.6;
+              ctx.crashTimer = 0.9;
+              ctx.crashFlash = 0.6;
+              try {
+                void ctx.sfxDeath?.play?.();
+              } catch (e) {}
+              try {
+                ctx.effects.shake.shake(10);
+              } catch (e) {}
+              try {
+                ctx.effects.onCrash(currPlayer.x, playerFeetY, currPlayer.vx, currPlayer.vy);
+              } catch (e) {}
+              try {
+                ctx.playerEntity = null;
+              } catch (e) {}
+              break;
+            }
+
+            // Otherwise, the player has hit the vertical face above the ground.
+            // In that case we should block horizontal movement and prevent the
+            // physics from 'magically' climbing the player up onto the slope.
+            // Nudge the player out of the wall and zero horizontal velocity.
+            try {
+              const edgeX = i + 1;
+              // If moving right into a left-side wall
+              if (dx < 0 && currPlayer.vx > 20) {
+                currPlayer.x = edgeX - HALF_WIDTH - 0.01;
+              }
+              // If moving left into a right-side wall
+              if (dx > 0 && currPlayer.vx < -20) {
+                currPlayer.x = edgeX + HALF_WIDTH + 0.01;
+              }
+              currPlayer.vx = 0;
+              // keep the player airborne so they don't immediately snap to terrain
+              currPlayer.grounded = false;
+              // small jump-lock to avoid instant re-grounding due to residual sampling
+              ctx.jumpLock = Math.max(ctx.jumpLock, 0.06);
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
   // hazard detection (objects in level)
   const objects = currentLevel.objects || [];
   for (const obj of objects) {
@@ -408,7 +553,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const radius = obj.radius || 12;
 
     if (distSq < radius * radius) {
-      if (obj.type === 'hazard') {
+      if (obj.type === 'hazard' || (obj as any).type === 'wall') {
         // don't allow hazards to kill the player once they've reached the finish
         if (!ctx.reachedFinish && currPlayer.invulnTimer <= 0) {
           // crash
@@ -417,7 +562,15 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
             ctx.crashFade = 0.6;
             ctx.crashTimer = 0.9;
             void ctx.sfxDeath?.play?.();
-            ctx.effects.shake.shake(8);
+            try {
+              ctx.effects.shake.shake(8);
+            } catch (e) {}
+            try {
+              ctx.effects.onCrash(currPlayer.x, currPlayer.y + FEET_OFFSET, currPlayer.vx, currPlayer.vy);
+            } catch (e) {}
+            try {
+              ctx.playerEntity = null;
+            } catch (e) {}
           }
         }
       } else if (obj.type === 'finish') {
@@ -444,6 +597,12 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
       ctx.crashFade = 0.6;
       ctx.crashTimer = 0.9;
       void ctx.sfxDeath?.play?.();
+      try {
+        ctx.effects.onCrash(currPlayer.x, currPlayer.y + FEET_OFFSET, currPlayer.vx, currPlayer.vy);
+      } catch (e) {}
+      try {
+        ctx.playerEntity = null;
+      } catch (e) {}
     }
   }
 

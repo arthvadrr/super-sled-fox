@@ -242,6 +242,35 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
 
   // Draw objects
   const objects = currentLevel.objects || [];
+  // Draw gap-edge walls (wood) between a solid segment and a gap
+  try {
+    vctx.save();
+    const wood = (ctx as any).woodPattern || null;
+    const WALL_HALF = 0.5; // world units half-width of wall
+    for (let xi = leftIdx; xi < rightIdx; xi++) {
+      const left = getHeightAtX(currentLevel as any, xi);
+      const right = getHeightAtX(currentLevel as any, xi + 1);
+      if ((left === null && right !== null) || (left !== null && right === null)) {
+        const edgeX = xi + 1;
+        const worldLeft = edgeX - WALL_HALF;
+        const worldRight = edgeX + WALL_HALF;
+        const sxLeft = isEditor ? wxToS(worldLeft) : worldLeft - camOffsetX;
+        const sxRight = isEditor ? wxToS(worldRight) : worldRight - camOffsetX;
+        const solidH = left === null ? (right as number) : (left as number);
+        const syTop = isEditor ? wyToS(solidH) : solidH - camOffsetY + shakeY;
+        const syBottom = isEditor ? wyToS(VIRTUAL_HEIGHT) : VIRTUAL_HEIGHT - camOffsetY + shakeY;
+        const h = Math.max(1, Math.round(syBottom - syTop));
+        if (wood) vctx.fillStyle = wood as any;
+        else vctx.fillStyle = '#5a3414';
+        vctx.fillRect(Math.round(sxLeft), Math.round(syTop), Math.round(sxRight - sxLeft), h);
+        // fallback stroked edge
+        vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        vctx.lineWidth = Math.max(1 * zoom, 0.5);
+        vctx.strokeRect(Math.round(sxLeft), Math.round(syTop), Math.round(sxRight - sxLeft), h);
+      }
+    }
+    vctx.restore();
+  } catch (e) {}
   for (const obj of objects) {
     const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
     const sy = isEditor ? wyToS(obj.y) : obj.y - camOffsetY + shakeY;
@@ -277,6 +306,25 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.arc(sx, sy, radius, 0, Math.PI * 2);
       vctx.stroke();
       vctx.setLineDash([]);
+    } else if ((obj as any).type === 'wall') {
+      // draw explicit editor-placed wall: top aligns with terrain unless obj.y specified
+      const oy = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
+      const widthWorld = obj.width || 1;
+      const halfW = widthWorld / 2;
+      const worldLeft = obj.x - halfW;
+      const worldRight = obj.x + halfW;
+      const sxL = isEditor ? wxToS(worldLeft) : worldLeft - camOffsetX;
+      const sxR = isEditor ? wxToS(worldRight) : worldRight - camOffsetX;
+      const syTop = isEditor ? wyToS(oy) : oy - camOffsetY + shakeY;
+      const syBottom = isEditor ? wyToS(VIRTUAL_HEIGHT) : VIRTUAL_HEIGHT - camOffsetY + shakeY;
+      const h = Math.max(1, Math.round(syBottom - syTop));
+      const wood = (ctx as any).woodPattern || null;
+      if (wood) vctx.fillStyle = wood as any;
+      else vctx.fillStyle = '#5a3414';
+      vctx.fillRect(Math.round(sxL), Math.round(syTop), Math.round(sxR - sxL), h);
+      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
+      vctx.strokeRect(Math.round(sxL), Math.round(syTop), Math.round(sxR - sxL), h);
     }
   }
 
