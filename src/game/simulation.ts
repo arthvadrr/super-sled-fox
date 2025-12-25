@@ -588,6 +588,30 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         if (ox > ctx.lastCheckpointX) {
           ctx.lastCheckpointX = ox;
           void ctx.sfxCheckpoint?.play?.();
+          try {
+            // emit many small orange upward sparks when a checkpoint is reached
+            if (ctx.effects && ctx.effects.particles) {
+              const emitX = ox;
+              const emitY = oy - 6; // slightly above ground
+              // big burst of upward orange sparks
+              ctx.effects.shake.shake(6, 0.18);
+              ctx.effects.particles.emitDirectional(emitX, emitY, 240, {
+                angle: -Math.PI * 0.5, // upward
+                spread: 1.6,
+                speed: 180,
+                size: 1.2,
+                color: '#ff8c00',
+                ttl: 1.6,
+              });
+              // layered small explosion for extra density
+              ctx.effects.particles.emitExplosion(emitX, emitY - 6, 40, {
+                spread: 40,
+                speed: 120,
+                size: 2,
+                color: '#ffb86b',
+              });
+            }
+          } catch (e) {}
         }
       }
     }

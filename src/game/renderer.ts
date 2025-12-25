@@ -272,8 +272,10 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     vctx.restore();
   } catch (e) {}
   for (const obj of objects) {
+    // determine object world Y (fall back to terrain height if unspecified)
+    const oyWorld = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
     const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
-    const sy = isEditor ? wyToS(obj.y) : obj.y - camOffsetY + shakeY;
+    const sy = isEditor ? wyToS(oyWorld) : oyWorld - camOffsetY + shakeY;
     const radius = (obj.radius || 12) * zoom;
     if (sx < -radius || sx > VIRTUAL_WIDTH + radius) continue;
 
@@ -286,26 +288,90 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.lineWidth = 1.5 * zoom;
       vctx.stroke();
     } else if (obj.type === 'finish') {
+      // draw a checkered finish flag on a wooden pole
+      const poleH = 36 * zoom;
+      const poleW = Math.max(1, Math.round(2 * zoom));
+      const poleX = Math.round(sx - poleW / 2);
+      const poleY = Math.round(sy - poleH);
+      // pole
+      vctx.fillStyle = (ctx as any).woodPattern || '#5a3414';
+      vctx.fillRect(poleX, poleY, poleW, Math.round(poleH));
+      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
+      vctx.strokeRect(poleX, poleY, poleW, Math.round(poleH));
+      // flag rectangle (checkered)
+      const flagW = Math.round(16 * zoom);
+      const flagH = Math.round(12 * zoom);
+      const flagX = Math.round(sx + poleW / 2);
+      const flagY = Math.round(poleY + 2);
+      // draw checkerboard 4x3
+      const cols = 4;
+      const rows = 3;
+      const cellW = Math.max(1, Math.floor(flagW / cols));
+      const cellH = Math.max(1, Math.floor(flagH / rows));
+      for (let cx = 0; cx < cols; cx++) {
+        for (let cy = 0; cy < rows; cy++) {
+          const isWhite = (cx + cy) % 2 === 0;
+          vctx.fillStyle = isWhite ? '#fff' : '#000';
+          vctx.fillRect(flagX + cx * cellW, flagY + cy * cellH, cellW, cellH);
+        }
+      }
+      // thin outline for flag
+      vctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
+      vctx.strokeRect(flagX, flagY, flagW, flagH);
+    } else if (obj.type === 'checkpoint') {
+      // draw an orange checkpoint flag on a wooden pole (active = lighter)
+      const active = ctx.lastCheckpointX >= obj.x;
+      const poleH = 36 * zoom;
+      const poleW = Math.max(1, Math.round(2 * zoom));
+      const poleX = Math.round(sx - poleW / 2);
+      const poleY = Math.round(sy - poleH);
+      vctx.fillStyle = (ctx as any).woodPattern || '#5a3414';
+      vctx.fillRect(poleX, poleY, poleW, Math.round(poleH));
+      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
+      vctx.strokeRect(poleX, poleY, poleW, Math.round(poleH));
+      const flagW = Math.round(14 * zoom);
+      const flagH = Math.round(10 * zoom);
+      const fx0 = Math.round(sx + poleW / 2);
+      const fy0 = Math.round(poleY + 2);
+      vctx.fillStyle = active ? '#ffd27f' : '#ff8c00';
+      vctx.beginPath();
+      vctx.moveTo(fx0, fy0);
+      vctx.lineTo(fx0 + flagW, fy0 + flagH / 2);
+      vctx.lineTo(fx0, fy0 + flagH);
+      vctx.closePath();
+      vctx.fill();
+      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
+      vctx.stroke();
+    } else if (obj.type === 'start') {
+      // draw a green start flag on a wooden pole
+      const poleH = 36 * zoom;
+      const poleW = Math.max(1, Math.round(2 * zoom));
+      const poleX = Math.round(sx - poleW / 2);
+      const poleY = Math.round(sy - poleH);
+      vctx.fillStyle = (ctx as any).woodPattern || '#5a3414';
+      vctx.fillRect(poleX, poleY, poleW, Math.round(poleH));
+      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
+      vctx.strokeRect(poleX, poleY, poleW, Math.round(poleH));
+      // green triangular flag
+      const flagW = Math.round(14 * zoom);
+      const flagH = Math.round(10 * zoom);
+      const fx0 = Math.round(sx + poleW / 2);
+      const fy0 = Math.round(poleY + 2);
       vctx.fillStyle = '#44ff44';
       vctx.beginPath();
-      vctx.arc(sx, sy, radius, 0, Math.PI * 2);
+      vctx.moveTo(fx0, fy0);
+      vctx.lineTo(fx0 + flagW, fy0 + flagH / 2);
+      vctx.lineTo(fx0, fy0 + flagH);
+      vctx.closePath();
       vctx.fill();
-      vctx.strokeStyle = '#fff';
-      vctx.lineWidth = 2 * zoom;
+      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      vctx.lineWidth = Math.max(1 * zoom, 0.5);
       vctx.stroke();
-    } else if (obj.type === 'checkpoint') {
-      const active = ctx.lastCheckpointX >= obj.x;
-      vctx.fillStyle = active ? '#ffff44' : '#666644';
-      vctx.beginPath();
-      vctx.arc(sx, sy, radius * 0.7, 0, Math.PI * 2);
-      vctx.fill();
-    } else if (obj.type === 'start') {
-      vctx.strokeStyle = '#8888ff';
-      vctx.setLineDash([4 * zoom, 4 * zoom]);
-      vctx.beginPath();
-      vctx.arc(sx, sy, radius, 0, Math.PI * 2);
-      vctx.stroke();
-      vctx.setLineDash([]);
     } else if ((obj as any).type === 'wall') {
       // draw explicit editor-placed wall: top aligns with terrain unless obj.y specified
       const oy = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);

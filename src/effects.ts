@@ -35,7 +35,12 @@ export class ParticleSystem {
     }
   }
 
-  emitDirectional(x: number, y: number, count = 6, opts: { angle?: number; spread?: number; speed?: number; size?: number; color?: string } = {}) {
+  emitDirectional(
+    x: number,
+    y: number,
+    count = 6,
+    opts: { angle?: number; spread?: number; speed?: number; size?: number; color?: string; ttl?: number } = {}
+  ) {
     if (!this.enabled) return;
     const angleBase = opts.angle ?? Math.PI * 0.5; // default up
     const spread = opts.spread ?? 0.9; // radians
@@ -50,7 +55,7 @@ export class ParticleSystem {
         y,
         vx: Math.cos(ang) * s + (Math.random() - 0.5) * 6,
         vy: Math.sin(ang) * s + (Math.random() - 0.5) * 4,
-        ttl: 0.4 + Math.random() * 0.6,
+        ttl: (typeof opts.ttl === 'number' ? opts.ttl : 0.4 + Math.random() * 0.6) * (0.8 + Math.random() * 0.6),
         age: 0,
         size: size * (0.6 + Math.random() * 0.9),
         color,
@@ -212,10 +217,10 @@ export class EffectsManager {
     this.shake.shake(30, 1.6);
 
     // central blast: lots of bright shards (emit in full circle)
-    this.particles.emitExplosion(x, y, 120, { spread: 120, speed: 420, size: 3.6, color: '#ffffff' });
+    this.particles.emitExplosion(x, y, 120, { spread: 120, speed: 420, size: 3.6, color: '#ffb86b' });
 
     // layered chunky debris in different tones
-    const colors = ['#d9eaff', '#b3e0ff', '#d9cbb3', '#ffffff', '#9fc8ff'];
+    const colors = ['#ffd27f', '#ffb86b', '#ff8c00', '#ffcf9b', '#ffc57a'];
     for (let c = 0; c < colors.length; c++) {
       this.particles.emitExplosion(x + (Math.random() - 0.5) * 16, y + (Math.random() - 0.5) * 16, 18, {
         spread: 68,
@@ -237,7 +242,7 @@ export class EffectsManager {
         ttl: 1.2 + Math.random() * 1.6,
         age: 0,
         size: 6 + Math.random() * 10,
-        color: '#bfcfcf',
+        color: '#b36b3b',
       });
     }
   }
