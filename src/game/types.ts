@@ -38,6 +38,7 @@ export interface GameContext {
   lastAccelScaled: number;
 
   landingFlash: number;
+  crashFlash: number;
   crashFade: number;
   crashTimer: number;
   restartHintTimer: number;
@@ -79,6 +80,7 @@ export interface GameContext {
 
   snowPattern: CanvasPattern | null;
   noisePattern: CanvasPattern | null;
+  woodPattern?: CanvasPattern | null;
 
   accumulator: number;
   lastTime: number;

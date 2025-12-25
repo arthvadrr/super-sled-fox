@@ -20,7 +20,7 @@ import {
   GameContext,
   Camera
 } from './game/types';
-import { createSnowPattern, createNoisePattern } from './game/patterns';
+import { createSnowPattern, createNoisePattern, createWoodPattern } from './game/patterns';
 import { simulate } from './game/simulation';
 import { draw } from './game/renderer';
 import { loadLevelAssets, loadLevelByIndex } from './game/levelLoader';
@@ -71,6 +71,7 @@ export default function Game() {
     // Create visual texture patterns using extracted functions
     const snowPattern = createSnowPattern(vctx);
     const noisePattern = createNoisePattern(vctx);
+    const woodPattern = createWoodPattern(vctx);
 
     // Initialize player and camera
     const initialPlayer: Player = createPlayer();
@@ -97,6 +98,7 @@ export default function Game() {
       lastAccelScaled: 0,
 
       landingFlash: 0,
+      crashFlash: 0,
       crashFade: 0,
       crashTimer: 0,
       restartHintTimer: 0,
@@ -138,6 +140,7 @@ export default function Game() {
 
       snowPattern,
       noisePattern,
+      woodPattern,
 
       accumulator: 0,
       lastTime: performance.now()

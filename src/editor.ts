@@ -30,6 +30,7 @@ export function startEditor(opts: StartOpts) {
     PlaceCheckpoint = 'PlaceCheckpoint',
     PlaceStart = 'PlaceStart',
     PlaceFinish = 'PlaceFinish',
+    PlaceWall = 'PlaceWall',
     Select = 'Select',
   }
 
@@ -168,6 +169,21 @@ export function startEditor(opts: StartOpts) {
       return;
     }
 
+    if (currentTool === Tool.PlaceWall) {
+      // toggle wall at this index
+      if (!Array.isArray(level.objects)) level.objects = [] as any;
+      // find existing wall within 1 segment
+      const found = (level.objects || []).findIndex((o) => (o as any).type === 'wall' && Math.abs(((o as any).x || 0) - idx) <= 1);
+      if (found >= 0) {
+        level.objects.splice(found, 1);
+      } else {
+        level.objects.push({ type: 'wall', x: idx } as any);
+      }
+      selectedObjectIndex = null;
+      scheduleOnChange();
+      return;
+    }
+
     if (currentTool === Tool.Select) {
       const pickRadius = 12; // virtual pixels
       const radiusSegments = Math.ceil(pickRadius / Math.max(1, segmentLen));
@@ -294,7 +310,15 @@ export function startEditor(opts: StartOpts) {
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('pointercancel', onPointerUp);
     window.removeEventListener('keydown', onKeyDown as any);
+    window.removeEventListener('keydown', onKeyDownExtra as any);
   }
+
+  // allow switching to wall tool via key '6'
+  function onKeyDownExtra(e: KeyboardEvent) {
+    const k = e.key.toLowerCase();
+    if (k === '6') currentTool = Tool.PlaceWall;
+  }
+  window.addEventListener('keydown', onKeyDownExtra as any);
 
   // Smooth the `level.segments` array in-place using a simple moving average
   // over a radius (in segments). Null (gaps) are preserved.
@@ -365,6 +389,40 @@ export function startEditor(opts: StartOpts) {
       }
     }
 
+    // draw gap-edge walls in editor (purple) so designers can see where
+    // collision faces will be created. This is editor-only and does not
+    // affect in-game visuals.
+    try {
+      const wallHalf = Math.min(segmentLen * 0.5, 2);
+      for (let i = startX; i <= endX; i++) {
+        const left = level.segments[i];
+        const right = i + 1 < (level.segments || []).length ? level.segments[i + 1] : undefined;
+        if ((left === null && typeof right === 'number') || (typeof left === 'number' && right === null)) {
+          const edgeX = (i + 1) * segmentLen;
+          const worldLeft = edgeX - wallHalf;
+          const worldRight = edgeX + wallHalf;
+          const sxLeft = worldLeft;
+          const sxRight = worldRight;
+          const solidH = left === null ? (right as number) : (left as number);
+          const syTop = solidH;
+          const syBottom = topWorld + viewH;
+          // editor-only purple wall fill
+          vctx.fillStyle = 'rgba(160,64,255,0.95)';
+          vctx.fillRect(sxLeft, syTop, sxRight - sxLeft, syBottom - syTop);
+          // decorative darker streaks to imply texture
+          vctx.strokeStyle = 'rgba(90,20,140,0.6)';
+          vctx.lineWidth = onePx * 0.8;
+          for (let k = 0; k < 3; k++) {
+            const mx = sxLeft + (sxRight - sxLeft) * ((k + 1) / 4) + Math.sin((i + 1) * (k + 3)) * (onePx * 2);
+            vctx.beginPath();
+            vctx.moveTo(mx, syTop - onePx);
+            vctx.lineTo(mx + Math.sin((i + 1) * (k + 5)) * onePx * 2, syBottom + onePx);
+            vctx.stroke();
+          }
+        }
+      }
+    } catch (e) {}
+
     // hovered segment highlight
     if (hoveredIndex !== null) {
       const hx = hoveredIndex * segmentLen;
@@ -397,25 +455,56 @@ export function startEditor(opts: StartOpts) {
       if (!obj) continue;
       if (obj.x < startX - 1 || obj.x > endX + 1) continue;
       const ox = obj.x * segmentLen;
-      if (obj.type === 'start') {
+      vctx.lineWidth = (selectedObjectIndex === i ? 2 : 1) * onePx;
+      if ((obj as any).type === 'start') {
         vctx.strokeStyle = '#00ff44';
         vctx.fillStyle = '#00ff44';
-      } else if (obj.type === 'finish') {
+        vctx.beginPath();
+        vctx.moveTo(ox + halfPx, topWorld + 4);
+        vctx.lineTo(ox + halfPx, bottomWorld - 4);
+        vctx.stroke();
+        vctx.font = '10px monospace';
+        vctx.textAlign = 'center';
+        vctx.fillText('S', ox + halfPx, topWorld + 14);
+      } else if ((obj as any).type === 'finish') {
         vctx.strokeStyle = '#ff4d6d';
         vctx.fillStyle = '#ff4d6d';
+        vctx.beginPath();
+        vctx.moveTo(ox + halfPx, topWorld + 4);
+        vctx.lineTo(ox + halfPx, bottomWorld - 4);
+        vctx.stroke();
+        vctx.font = '10px monospace';
+        vctx.textAlign = 'center';
+        vctx.fillText('F', ox + halfPx, topWorld + 14);
+      } else if ((obj as any).type === 'wall') {
+        // explicit wall object: top aligns to terrain at that x unless obj.y provided
+        const oy = typeof (obj as any).y === 'number' ? (obj as any).y : (level.segments[Math.round(obj.x)] as number) || topWorld + viewH / 2;
+        const widthWorld = (obj as any).width || Math.max(1, segmentLen * 0.6);
+        const halfW = widthWorld / 2;
+        const sxLeft = ox - halfW;
+        const sxRight = ox + halfW;
+        const syTop = oy;
+        const syBottom = topWorld + viewH;
+        vctx.fillStyle = '#6b3f1a';
+        vctx.fillRect(sxLeft, syTop, sxRight - sxLeft, syBottom - syTop);
+        vctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        vctx.lineWidth = onePx;
+        vctx.strokeRect(sxLeft, syTop, sxRight - sxLeft, syBottom - syTop);
+        vctx.font = '10px monospace';
+        vctx.textAlign = 'center';
+        vctx.fillStyle = '#ffd700';
+        vctx.fillText('W', ox + halfPx, topWorld + 14);
       } else {
         vctx.strokeStyle = '#ffd700';
         vctx.fillStyle = '#ffd700';
+        vctx.beginPath();
+        vctx.moveTo(ox + halfPx, topWorld + 4);
+        vctx.lineTo(ox + halfPx, bottomWorld - 4);
+        vctx.stroke();
+        vctx.font = '10px monospace';
+        vctx.textAlign = 'center';
+        vctx.fillText('C', ox + halfPx, topWorld + 14);
       }
-      vctx.lineWidth = (selectedObjectIndex === i ? 2 : 1) * onePx;
-      vctx.beginPath();
-      vctx.moveTo(ox + halfPx, topWorld + 4);
-      vctx.lineTo(ox + halfPx, bottomWorld - 4);
-      vctx.stroke();
-      // label
-      vctx.font = '10px monospace';
-      vctx.textAlign = 'center';
-      vctx.fillText(obj.type === 'start' ? 'S' : obj.type === 'finish' ? 'F' : 'C', ox + halfPx, topWorld + 14);
       if (selectedObjectIndex === i) {
         vctx.strokeStyle = 'rgba(255,255,255,0.9)';
         vctx.strokeRect(ox - 6 * onePx, topWorld + 16, 12 * onePx, 12 * onePx);
