@@ -647,6 +647,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const dy = currPlayer.y - oy;
     const distSq = dx * dx + dy * dy;
     const radius = obj.radius || 12;
+    let collided = false;
 
     // Allow finish to trigger when the player crosses the object's X coordinate
     // during this frame (swept X test) so jumping directly over the finish
@@ -654,8 +655,23 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const prevX = currPlayer.x - currPlayer.vx * dt;
     const crossedX = (prevX <= ox && currPlayer.x >= ox) || (prevX >= ox && currPlayer.x <= ox);
 
-    if (distSq < radius * radius || crossedX) {
-      if (obj.type === 'hazard' || (obj as any).type === 'wall') {
+    if (obj.type === 'collider') {
+      // rectangular collider: use width/height (world units) centered at obj.x/obj.y
+      // use the player's feet position for more accurate contact testing
+      const cw = (obj as any).width || 16;
+      const ch = (obj as any).height || 24;
+      const halfW = cw / 2;
+      const halfH = ch / 2;
+      const px = currPlayer.x;
+      const pyFeet = currPlayer.y + FEET_OFFSET;
+      // overlap test between player's feet point and collider rect (with horizontal half-width)
+      if (Math.abs(px - ox) <= halfW + HALF_WIDTH && Math.abs(pyFeet - oy) <= halfH + FEET_OFFSET) collided = true;
+    } else {
+      if (distSq < radius * radius || crossedX) collided = true;
+    }
+
+    if (collided) {
+      if (obj.type === 'hazard' || (obj as any).type === 'wall' || (obj as any).type === 'collider') {
         // don't allow hazards to kill the player once they've reached the finish
         if (!ctx.reachedFinish && currPlayer.invulnTimer <= 0) {
           // crash

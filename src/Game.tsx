@@ -680,6 +680,65 @@ export default function Game() {
                 decorMenu.appendChild(deleteBtn);
                 editorUI.appendChild(decorMenu);
 
+                // small floating menu for selected collider: width/height + delete
+                const colliderMenu = document.createElement('div');
+                colliderMenu.id = 'editor-collider-menu';
+                colliderMenu.className = 'decor-menu';
+                colliderMenu.style.display = 'none';
+
+                const colliderWidthLabel = document.createElement('div');
+                colliderWidthLabel.textContent = 'Width: ';
+                const colliderWidthVal = document.createElement('span');
+                colliderWidthVal.textContent = '0';
+                colliderWidthLabel.appendChild(colliderWidthVal);
+                colliderMenu.appendChild(colliderWidthLabel);
+
+                const colliderHeightLabel = document.createElement('div');
+                colliderHeightLabel.textContent = 'Height: ';
+                const colliderHeightVal = document.createElement('span');
+                colliderHeightVal.textContent = '0';
+                colliderHeightLabel.appendChild(colliderHeightVal);
+                colliderMenu.appendChild(colliderHeightLabel);
+
+                const colliderWidthMinus = document.createElement('button'); colliderWidthMinus.textContent = '-'; colliderWidthMinus.className = 'editor-btn';
+                const colliderWidthPlus = document.createElement('button'); colliderWidthPlus.textContent = '+'; colliderWidthPlus.className = 'editor-btn';
+                const colliderHeightMinus = document.createElement('button'); colliderHeightMinus.textContent = '-'; colliderHeightMinus.className = 'editor-btn';
+                const colliderHeightPlus = document.createElement('button'); colliderHeightPlus.textContent = '+'; colliderHeightPlus.className = 'editor-btn';
+                const deleteColliderBtn = document.createElement('button'); deleteColliderBtn.textContent = 'Delete'; deleteColliderBtn.className = 'editor-btn delete';
+
+                colliderMenu.appendChild(colliderWidthMinus);
+                colliderMenu.appendChild(colliderWidthPlus);
+                colliderMenu.appendChild(colliderHeightMinus);
+                colliderMenu.appendChild(colliderHeightPlus);
+                colliderMenu.appendChild(deleteColliderBtn);
+                editorUI.appendChild(colliderMenu);
+
+                // small floating menu for selected sign: 3 text lines + scale + delete
+                const signMenu = document.createElement('div');
+                signMenu.id = 'editor-sign-menu';
+                signMenu.className = 'decor-menu';
+                signMenu.style.display = 'none';
+
+                const signLineInputs: HTMLInputElement[] = [];
+                for (let i = 0; i < 3; i++) {
+                  const lbl = document.createElement('div');
+                  lbl.textContent = `Line ${i + 1}: `;
+                  const inp = document.createElement('input');
+                  inp.type = 'text';
+                  inp.maxLength = 10 as any;
+                  inp.className = 'editor-input';
+                  lbl.appendChild(inp);
+                  signMenu.appendChild(lbl);
+                  signLineInputs.push(inp as HTMLInputElement);
+                }
+                const signScaleMinus = document.createElement('button'); signScaleMinus.textContent = '-'; signScaleMinus.className = 'editor-btn';
+                const signScalePlus = document.createElement('button'); signScalePlus.textContent = '+'; signScalePlus.className = 'editor-btn';
+                const signDeleteBtn = document.createElement('button'); signDeleteBtn.textContent = 'Delete'; signDeleteBtn.className = 'editor-btn delete';
+                signMenu.appendChild(signScaleMinus);
+                signMenu.appendChild(signScalePlus);
+                signMenu.appendChild(signDeleteBtn);
+                editorUI.appendChild(signMenu);
+
                 // poll selection state from editor via canvas.dataset.editorSelected
                 const pollId = window.setInterval(() => {
                   try {
@@ -687,19 +746,59 @@ export default function Game() {
                     const sel = canvasElInner.dataset.editorSelected;
                     if (!sel) {
                       decorMenu.style.display = 'none';
+                      colliderMenu.style.display = 'none';
                       return;
                     }
                     const idx = Number(sel);
                     const obj = currentLevel.objects && currentLevel.objects[idx];
-                    if (!obj || obj.type !== 'decor') {
+                    if (!obj) {
                       decorMenu.style.display = 'none';
+                      colliderMenu.style.display = 'none';
                       return;
                     }
-                    // show menu and update scale value
-                    decorMenu.style.display = 'flex';
-                    scaleVal.textContent = String((obj as any).scale || 1);
-                    // update layer select
-                    try { layerSelect.value = String((obj as any).layer ?? 1); } catch (e) { }
+
+                    if (obj.type === 'decor') {
+                      colliderMenu.style.display = 'none';
+                      // show decor menu and update scale value
+                      decorMenu.style.display = 'flex';
+                      scaleVal.textContent = String((obj as any).scale || 1);
+                      try { layerSelect.value = String((obj as any).layer ?? 1); } catch (e) { }
+                      return;
+                    }
+
+                    if (obj.type === 'collider') {
+                      decorMenu.style.display = 'none';
+                      // show collider menu and update width/height
+                      colliderMenu.style.display = 'flex';
+                      const seg = (currentLevel.meta && (currentLevel.meta as any).segmentLen) || 1;
+                      const defW = Math.max(1, seg * 2);
+                      const w = (obj as any).width || defW;
+                      const h = (obj as any).height || 24;
+                      colliderWidthVal.textContent = String(w);
+                      colliderHeightVal.textContent = String(h);
+                      return;
+                    }
+
+                    if (obj.type === 'sign') {
+                      // show sign menu and populate lines
+                      decorMenu.style.display = 'none';
+                      colliderMenu.style.display = 'none';
+                      signMenu.style.display = 'flex';
+                      const lines: string[] = Array.isArray((obj as any).message) ? (obj as any).message : [];
+                      for (let i = 0; i < 3; i++) {
+                        const val = lines[i] || '';
+                        const inp = signLineInputs[i] as HTMLInputElement;
+                        if (inp.value !== val) inp.value = val;
+                      }
+                      // store scale on sign objects
+                      const s = (obj as any).scale || 1;
+                      // show scale in a simple way by storing on a data attr for visual debugging
+                      return;
+                    }
+
+                    // fallback: hide both
+                    decorMenu.style.display = 'none';
+                    colliderMenu.style.display = 'none';
                   } catch (e) { }
                 }, 150);
 
@@ -757,8 +856,138 @@ export default function Game() {
                   } catch (e) { }
                 };
 
+                // collider menu handlers
+                colliderWidthPlus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'collider') return;
+                    const inc = 10;
+                    (obj as any).width = ((obj as any).width || 20) + inc;
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
+                };
+                colliderWidthMinus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'collider') return;
+                    const dec = 10;
+                    (obj as any).width = Math.max(1, ((obj as any).width || 20) - dec);
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
+                };
+                colliderHeightPlus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'collider') return;
+                    const inc = 10;
+                    (obj as any).height = ((obj as any).height || 24) + inc;
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
+                };
+                colliderHeightMinus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'collider') return;
+                    const dec = 10;
+                    (obj as any).height = Math.max(1, ((obj as any).height || 24) - dec);
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
+                };
+                deleteColliderBtn.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    if (!Array.isArray(currentLevel.objects)) return;
+                    if (idx >= 0 && idx < currentLevel.objects.length) {
+                      currentLevel.objects.splice(idx, 1);
+                      canvasElInner.dataset.editorSelected = '';
+                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                    }
+                  } catch (e) { }
+                };
+
+                // sign menu handlers
+                signScalePlus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'sign') return;
+                    (obj as any).scale = ((obj as any).scale || 1) + 0.1;
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
+                };
+                signScaleMinus.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    const obj = currentLevel.objects && currentLevel.objects[idx];
+                    if (!obj || obj.type !== 'sign') return;
+                    (obj as any).scale = Math.max(0.1, ((obj as any).scale || 1) - 0.1);
+                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                  } catch (e) { }
+                };
+                signDeleteBtn.onclick = () => {
+                  try {
+                    const canvasElInner = canvasRef.current!;
+                    const sel = canvasElInner.dataset.editorSelected;
+                    if (!sel) return;
+                    const idx = Number(sel);
+                    if (!Array.isArray(currentLevel.objects)) return;
+                    if (idx >= 0 && idx < currentLevel.objects.length) {
+                      currentLevel.objects.splice(idx, 1);
+                      canvasElInner.dataset.editorSelected = '';
+                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                    }
+                  } catch (e) { }
+                };
+                for (let i = 0; i < 3; i++) {
+                  // prevent global key handlers from firing while typing
+                  signLineInputs[i].addEventListener('keydown', (ev) => { ev.stopPropagation(); });
+                  signLineInputs[i].addEventListener('keyup', (ev) => { ev.stopPropagation(); });
+                  // update message on each input event so poll doesn't overwrite typed text
+                  signLineInputs[i].addEventListener('input', () => {
+                    try {
+                      const canvasElInner = canvasRef.current!;
+                      const sel = canvasElInner.dataset.editorSelected;
+                      if (!sel) return;
+                      const idx = Number(sel);
+                      const obj = currentLevel.objects && currentLevel.objects[idx];
+                      if (!obj || obj.type !== 'sign') return;
+                      const lines = Array.isArray((obj as any).message) ? (obj as any).message.slice() : ['', '', ''];
+                      lines[i] = (signLineInputs[i] as HTMLInputElement).value.slice(0, 10).toUpperCase();
+                      (obj as any).message = lines;
+                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
+                    } catch (e) { }
+                  });
+                }
+
+
+
                 // attach menu to cleanup list
-                (gameContext.editorStop as any).__exportImportNodes = { ...(gameContext.editorStop as any).__exportImportNodes || {}, decorLabel, decorMenu, pollId };
+                (gameContext.editorStop as any).__exportImportNodes = { ...(gameContext.editorStop as any).__exportImportNodes || {}, decorLabel, decorMenu, colliderMenu, pollId };
                 // store pollId globally as a fallback so we can clear it if needed
                 try { (window as any).__editor_decor_poll = pollId; } catch (e) { }
 
@@ -878,7 +1107,7 @@ export default function Game() {
                 window.addEventListener('dragover', onDragOver);
 
                 // attach to editor handlers for cleanup
-                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn, decorLabel, decorMenu, pollId, editorUI };
+                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn, decorLabel, decorMenu, colliderMenu, signMenu, pollId, editorUI };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -954,6 +1183,14 @@ export default function Game() {
                 // keydown handler for keyboard zoom/reset
                 const keydownHandler = (ev: KeyboardEvent) => {
                   if (stateRef.current !== 'editor') return;
+                  // ignore zoom keys while typing in inputs
+                  try {
+                    const ae = document.activeElement as HTMLElement | null;
+                    if (ae) {
+                      const tag = (ae.tagName || '').toLowerCase();
+                      if (tag === 'input' || tag === 'textarea' || tag === 'select' || ae.isContentEditable) return;
+                    }
+                  } catch (err) {}
                   if (ev.key === '=' || ev.key === '+') {
                     let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, gameContext.editorZoom * 1.1));
                     gameContext.editorZoom = newZoom; gameContext.lastEditorZoom = gameContext.editorZoom;

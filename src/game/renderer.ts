@@ -359,12 +359,25 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
     const sy = isEditor ? wyToS(oyWorld) : oyWorld - camOffsetY + shakeY;
     const radius = (obj.radius || 12) * zoom;
-    if (sx < -radius || sx > VIRTUAL_WIDTH + radius) continue;
+    // Adjust culling for wide objects like signs so their full board is considered
+    let effectiveRadius = radius;
+    try {
+      if (obj.type === 'sign') {
+        const scale = (obj as any).scale || 1;
+        const poleW = Math.max(1, Math.round(2 * zoom * scale));
+        const boardW = Math.round(56 * zoom * scale);
+        // horizontal extent from center: half pole + gap + board width
+        effectiveRadius = Math.max(effectiveRadius, Math.round(poleW / 2 + 2 + boardW));
+      }
+    } catch (e) {}
+    if (sx < -effectiveRadius || sx > VIRTUAL_WIDTH + effectiveRadius) continue;
 
     if (obj.type === 'decor') {
       // skip decor already drawn behind the ground (layer === 0)
+      // and skip front-layer decor (layer === 1) here so we can draw
+      // it after the player (player should render behind front decor).
       const layer = (obj as any).layer;
-      if (typeof layer === 'number' && layer === 0) continue;
+      if (typeof layer === 'number' && (layer === 0 || layer === 1)) continue;
       try {
         const oyWorld = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
         const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
@@ -510,11 +523,12 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.strokeStyle = 'rgba(0,0,0,0.25)';
       vctx.lineWidth = Math.max(1 * zoom, 0.5);
       vctx.strokeRect(poleX, poleY, poleW, Math.round(poleH));
-      // board
-      const boardW = Math.round(56 * zoom);
-      const boardH = Math.round(30 * zoom);
-      const boardX = Math.round(sxSign + poleW / 2 + 2);
-      const boardY = Math.round(poleY + 2);
+      // board (support optional `scale` on sign objects)
+      const signScale = (obj as any).scale || 1;
+      const boardW = Math.round(56 * zoom * signScale);
+      const boardH = Math.round(30 * zoom * signScale);
+      const boardX = Math.round(sxSign + poleW / 2 + 2 * signScale);
+      const boardY = Math.round(poleY + 2 * signScale);
       vctx.fillStyle = '#c28f59';
       vctx.fillRect(boardX, boardY, boardW, boardH);
       vctx.strokeStyle = 'rgba(0,0,0,0.25)';
@@ -523,15 +537,15 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       try {
         const lines: string[] = Array.isArray((obj as any).message) ? (obj as any).message : [];
         vctx.fillStyle = '#000';
-        const padX = 8 * zoom;
-        const padY = 6 * zoom;
-        const fontSize = Math.max(9 * zoom, 9);
+        const padX = 8 * zoom * signScale;
+        const padY = 6 * zoom * signScale;
+        const fontSize = Math.max(9 * zoom * signScale, 9);
         vctx.font = `${fontSize}px monospace`;
         vctx.textAlign = 'center';
         vctx.textBaseline = 'top';
         const availableH = Math.max(1, boardH - padY * 2);
         const baseLineH = Math.max(1, Math.floor(availableH / 3));
-        const extraSpacing = Math.max(1, Math.round(2 * zoom));
+        const extraSpacing = Math.max(1, Math.round(2 * zoom * signScale));
         const lineH = baseLineH; // height reserved for each line's font area
         // center text block vertically, accounting for extra spacing between lines
         const linesCount = Math.min(3, Math.max(1, lines.length));
@@ -574,6 +588,33 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     // square. This avoids visual clutter when the player sprite hasn't loaded.
   }
   vctx.restore();
+
+  // Draw front-layer decor (layer === 1) after the player so the player appears behind it.
+  try {
+    const objsFront = currentLevel.objects || [];
+    for (const obj of objsFront) {
+      if (!obj || obj.type !== 'decor') continue;
+      const layer = (obj as any).layer;
+      if (typeof layer === 'number' && layer !== 1) continue;
+      try {
+        const oyWorld = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
+        const sx = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
+        const sy = isEditor ? wyToS(oyWorld) : oyWorld - camOffsetY + shakeY;
+        const scale = (obj as any).scale || 1;
+        const src = (obj as any).src || '';
+        const img = src ? assetManager.getImage(src) : undefined;
+        if (img) {
+          const w = (img.width || 64) * scale * zoom;
+          const h = (img.height || 64) * scale * zoom;
+          const dx = sx - w / 2;
+          const dy = sy - h;
+          vctx.drawImage(img, dx, dy, w, h);
+        } else if (src) {
+          assetManager.loadImage(src).catch(() => {});
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
 
   // Draw effects
   vctx.save();
@@ -723,7 +764,8 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
 
           let opacity = 0;
           if (isBoosting) opacity = 1.0;
-          else if (locked) opacity = 1.0; // keep fully visible when depleted (border will blink)
+          else if (locked)
+            opacity = 1.0; // keep fully visible when depleted (border will blink)
           else if (fullVisible) opacity = 1.0;
           else opacity = stamina >= 1 - 1e-6 ? 0.0 : 1.0; // do not reduce opacity while refilling
 

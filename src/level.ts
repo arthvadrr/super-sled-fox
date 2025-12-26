@@ -1,6 +1,6 @@
 export type Segment = number | null; // null represents a gap
 
-export type ObjType = 'start' | 'checkpoint' | 'finish' | 'sign' | 'wall' | 'hazard' | 'decor';
+export type ObjType = 'start' | 'checkpoint' | 'finish' | 'sign' | 'wall' | 'hazard' | 'decor' | 'collider';
 
 export interface LevelObject {
   type: ObjType;
@@ -50,7 +50,7 @@ export function validateLevel(l: Level): { ok: true } | { ok: false; reason: str
   const width = l.segments.length;
   for (const o of l.objects || []) {
     if (typeof o.x !== 'number' || o.x < 0 || o.x >= width) return { ok: false, reason: 'object out of bounds' };
-    if (!['start', 'checkpoint', 'finish', 'sign', 'wall', 'hazard', 'decor'].includes(o.type)) return { ok: false, reason: 'invalid object type' };
+    if (!['start', 'checkpoint', 'finish', 'sign', 'wall', 'hazard', 'decor', 'collider'].includes(o.type)) return { ok: false, reason: 'invalid object type' };
     if (o.type === 'sign') {
       const msg = (o as any).message;
       if (msg !== undefined) {
@@ -73,24 +73,32 @@ export function validateLevel(l: Level): { ok: true } | { ok: false; reason: str
       if (r !== undefined) {
         if (typeof r !== 'number' || !isFinite(r) || r <= 0) return { ok: false, reason: 'invalid hazard radius' };
       }
-        else if (o.type === 'decor') {
-          const s = (o as any).src;
-          if (s !== undefined) {
-            if (typeof s !== 'string') return { ok: false, reason: 'invalid decor src' };
-          }
-          const sc = (o as any).scale;
-          if (sc !== undefined) {
-            if (typeof sc !== 'number' || !isFinite(sc) || sc <= 0) return { ok: false, reason: 'invalid decor scale' };
-          }
-          const y = (o as any).y;
-          if (y !== undefined) {
-            if (typeof y !== 'number' || !isFinite(y)) return { ok: false, reason: 'invalid decor y' };
-          }
-          const layer = (o as any).layer;
-          if (layer !== undefined) {
-            if (typeof layer !== 'number' || !isFinite(layer)) return { ok: false, reason: 'invalid decor layer' };
-          }
+    } else if (o.type === 'collider') {
+      const w = (o as any).width;
+      const h = (o as any).height;
+      if (w !== undefined) {
+        if (typeof w !== 'number' || !isFinite(w) || w <= 0) return { ok: false, reason: 'invalid collider width' };
+      }
+      if (h !== undefined) {
+        if (typeof h !== 'number' || !isFinite(h) || h <= 0) return { ok: false, reason: 'invalid collider height' };
+      } else if (o.type === 'decor') {
+        const s = (o as any).src;
+        if (s !== undefined) {
+          if (typeof s !== 'string') return { ok: false, reason: 'invalid decor src' };
         }
+        const sc = (o as any).scale;
+        if (sc !== undefined) {
+          if (typeof sc !== 'number' || !isFinite(sc) || sc <= 0) return { ok: false, reason: 'invalid decor scale' };
+        }
+        const y = (o as any).y;
+        if (y !== undefined) {
+          if (typeof y !== 'number' || !isFinite(y)) return { ok: false, reason: 'invalid decor y' };
+        }
+        const layer = (o as any).layer;
+        if (layer !== undefined) {
+          if (typeof layer !== 'number' || !isFinite(layer)) return { ok: false, reason: 'invalid decor layer' };
+        }
+      }
     }
   }
   // validate optional meta avalanche speed

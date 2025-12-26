@@ -32,6 +32,7 @@ export function startEditor(opts: StartOpts) {
     PlaceStart = 'PlaceStart',
     PlaceFinish = 'PlaceFinish',
     PlaceWall = 'PlaceWall',
+    PlaceCollider = 'PlaceCollider',
     Select = 'Select',
     PlaceSign = 'PlaceSign',
     PlaceDecor = 'PlaceDecor',
@@ -142,7 +143,9 @@ export function startEditor(opts: StartOpts) {
           selectedObjectIndex = foundIndex;
           draggingObjectIndex = foundIndex;
           scheduleOnChange();
-          try { (e.target as Element).setPointerCapture(e.pointerId); } catch (err) {}
+          try {
+            (e.target as Element).setPointerCapture(e.pointerId);
+          } catch (err) {}
           return;
         }
       }
@@ -194,22 +197,11 @@ export function startEditor(opts: StartOpts) {
       return;
     }
     if (currentTool === Tool.PlaceSign) {
-      // place a sign and prompt for up to 3 lines (10 chars each)
+      // place a sign with empty message; edit via the sign editor menu
       if (!Array.isArray(level.objects)) level.objects = [] as any;
       const defaultMsg = ['', '', ''];
-      level.objects.push({ type: 'sign', x: idx, message: defaultMsg } as any);
+      level.objects.push({ type: 'sign', x: idx, message: defaultMsg, scale: 1 } as any);
       selectedObjectIndex = level.objects.length - 1;
-      // prompt for lines sequentially
-      try {
-        const lines: string[] = [];
-        for (let li = 0; li < 3; li++) {
-          const promptText = `Sign line ${li + 1} (max 10 chars, leave blank to skip)`;
-          const resp = window.prompt(promptText, '');
-          if (!resp) break;
-          lines.push(resp.slice(0, 10).toUpperCase());
-        }
-        if (lines.length > 0) level.objects[selectedObjectIndex].message = lines;
-      } catch (e) {}
       scheduleOnChange();
       return;
     }
@@ -246,6 +238,21 @@ export function startEditor(opts: StartOpts) {
         level.objects.push({ type: 'wall', x: idx } as any);
       }
       selectedObjectIndex = null;
+      scheduleOnChange();
+      return;
+    }
+
+    if (currentTool === Tool.PlaceCollider) {
+      if (!Array.isArray(level.objects)) level.objects = [] as any;
+      const oy = worldYToHeight(wy);
+      const defaultWidth = Math.max(1, segmentLen * 2);
+      const defaultHeight = 24;
+      const col: any = { type: 'collider', x: idx, y: oy, width: defaultWidth, height: defaultHeight };
+      level.objects.push(col);
+      selectedObjectIndex = level.objects.length - 1;
+      // allow immediate repositioning
+      draggingObjectIndex = selectedObjectIndex;
+      currentTool = Tool.Select;
       scheduleOnChange();
       return;
     }
@@ -330,8 +337,8 @@ export function startEditor(opts: StartOpts) {
       if (!obj) return;
       const newX = idx;
       obj.x = Math.max(0, Math.min(level.segments.length - 1, newX));
-      // for decor allow vertical dragging to set y
-      if (obj.type === 'decor') {
+      // for decor and collider allow vertical dragging to set y
+      if (obj.type === 'decor' || obj.type === 'collider') {
         const hy = worldYToHeight(wy);
         obj.y = hy;
       }
@@ -368,6 +375,14 @@ export function startEditor(opts: StartOpts) {
   window.addEventListener('pointercancel', onPointerUp);
 
   function onKeyDown(e: KeyboardEvent) {
+    // Ignore global editor hotkeys when typing into form fields
+    try {
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae) {
+        const tag = (ae.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || ae.isContentEditable) return;
+      }
+    } catch (err) {}
     const k = e.key.toLowerCase();
     if (k === '1') currentTool = Tool.PaintHeight;
     else if (k === '2') currentTool = Tool.ToggleGap;
@@ -375,6 +390,7 @@ export function startEditor(opts: StartOpts) {
     else if (k === '4') currentTool = Tool.PlaceStart;
     else if (k === '5') currentTool = Tool.PlaceFinish;
     else if (k === '9') currentTool = Tool.PlaceDecor;
+    else if (k === 'c') currentTool = Tool.PlaceCollider;
     else if (k === 'v' || k === '0') currentTool = Tool.Select;
     else if (k === '8') currentTool = Tool.PlaceSign;
     else if (k === '7') currentTool = Tool.Delete;
@@ -412,7 +428,7 @@ export function startEditor(opts: StartOpts) {
         scheduleOnChange();
       }
     } else if ((k === '+' || k === '=') && selectedObjectIndex !== null) {
-      // increase decor scale
+      // increase decor scale, or collider width
       const so = level.objects[selectedObjectIndex];
       if (so && so.type === 'decor') {
         so.scale = (so.scale || 1) + 0.1;
@@ -422,6 +438,10 @@ export function startEditor(opts: StartOpts) {
       const so = level.objects[selectedObjectIndex];
       if (so && so.type === 'decor') {
         so.scale = Math.max(0.1, (so.scale || 1) - 0.1);
+        scheduleOnChange();
+      } else if (so && so.type === 'collider') {
+        const decrement = 10;
+        so.width = Math.max(1, (so.width || 20) - decrement);
         scheduleOnChange();
       }
     }
@@ -653,6 +673,17 @@ export function startEditor(opts: StartOpts) {
         vctx.textAlign = 'center';
         vctx.fillStyle = '#ffd700';
         vctx.fillText('W', ox + halfPx, topWorld + 14);
+      } else if ((obj as any).type === 'collider') {
+        // editor-only orange collider box
+        const cw = (obj as any).width || Math.max(1, segmentLen * 2);
+        const ch = (obj as any).height || 24;
+        const cx = ox;
+        const cy = typeof (obj as any).y === 'number' ? (obj as any).y : (level.segments[Math.round(obj.x)] as number) || topWorld + viewH / 2;
+        vctx.fillStyle = 'rgba(255,140,0,0.9)';
+        vctx.fillRect(cx - cw / 2, cy - ch / 2, cw, ch);
+        vctx.strokeStyle = 'rgba(180,80,0,0.9)';
+        vctx.lineWidth = onePx;
+        vctx.strokeRect(cx - cw / 2, cy - ch / 2, cw, ch);
       } else {
         vctx.strokeStyle = '#ffd700';
         vctx.fillStyle = '#ffd700';
