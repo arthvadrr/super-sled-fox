@@ -758,21 +758,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.fillText('PRESS R TO RESTART LEVEL', VIRTUAL_WIDTH - 8, VIRTUAL_HEIGHT - 8);
     }
 
-    // Small controls hint at bottom center
-    try {
-      const hintText = 'JUMP: Spacebar  BRAKE: Left Arrow or A  BOOST: Hold Right Arrow or D';
-      vctx.font = '8px sans-serif';
-      vctx.textAlign = 'center';
-      vctx.fillStyle = 'rgba(0,0,0,0.45)';
-      // subtle background bar for readability
-      const padH = 6;
-      const hintW = vctx.measureText(hintText).width + 18;
-      const hintX = VIRTUAL_WIDTH / 2 - hintW / 2;
-      const hintY = VIRTUAL_HEIGHT - 18 - padH / 2;
-      vctx.fillRect(hintX, hintY, hintW, padH + 6);
-      vctx.fillStyle = 'rgba(255,255,255,0.92)';
-      vctx.fillText(hintText, VIRTUAL_WIDTH / 2, VIRTUAL_HEIGHT - 12);
-    } catch (e) {}
+    // controls hint removed
   }
 
   if (noisePattern) {

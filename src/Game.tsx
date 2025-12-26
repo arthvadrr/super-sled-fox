@@ -599,6 +599,8 @@ export default function Game() {
                   'decor/pine-tree-dark.png',
                   'decor/snowy-cabin.png',
                   'decor/wood-cabin-2.png',
+                  'decor/boulder-tall.png',
+                  'decor/wide-boulder.png',
                 ];
 
                 function refreshPalette() {
