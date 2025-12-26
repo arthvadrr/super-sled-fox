@@ -55,6 +55,14 @@ class AudioManager {
           try {
             element.loop = wrapper.loop;
             element.volume = wrapper.volume;
+            try {
+              // If the sound is already playing, stop and rewind so retriggering
+              // causes the sound to play from the start.
+              element.pause();
+            } catch (e) {}
+            try {
+              element.currentTime = 0;
+            } catch (e) {}
             await element.play();
           } catch (e) {
             // ignore
@@ -72,6 +80,7 @@ class AudioManager {
       pause: () => {
         try {
           element.pause();
+          try { element.currentTime = 0; } catch (e) {}
         } catch (e) {}
       },
       get volume() {

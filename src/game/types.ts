@@ -68,6 +68,8 @@ export interface GameContext {
   sfxCheckpoint: any;
   sfxDeath: any;
   sfxComplete: any;
+  // optional background music playable for the current level
+  music?: any;
 
   coyoteTimer: number;
   jumpBuffer: number;

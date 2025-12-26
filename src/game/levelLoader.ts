@@ -36,6 +36,21 @@ export async function loadLevelAssets(ctx: GameContext) {
       ctx.sfxComplete = await audioManager.createSound(sfxMeta.complete || 'sfx/complete.mp3').catch(() => null);
     } catch (e) {}
 
+    // load background music if specified in level meta (meta.music)
+    try {
+      // stop any previous music before loading new
+      try { ctx.music?.pause?.(); } catch (e) {}
+      ctx.music = undefined;
+      const musicPath = meta.music || (meta.assets && (meta.assets as any).music);
+      if (musicPath) {
+        ctx.music = await audioManager.createSound(musicPath).catch(() => null);
+        if (ctx.music) {
+          try { ctx.music.loop = true; } catch (e) {}
+          try { void ctx.music.play?.(); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+
     try {
       const layersSpec: any[] = meta.parallax || meta.layers || [];
       const loaded = await loadParallaxLayers(assetManager, layersSpec);
@@ -55,12 +70,7 @@ export async function loadLevelAssets(ctx: GameContext) {
       // Debug: log what image source we ended up with so the browser console
       // will show 404s or wrong paths when running the app.
       try {
-        // eslint-disable-next-line no-console
-        console.log('[assets] player image src:', pImg ? pImg.src : '(none)');
-        if (isPlaceholder) {
-          // eslint-disable-next-line no-console
-          console.warn('[assets] player sprite not found; loaded placeholder. Tried: sprites/player.png, sprites/player.svg, sprites/fox-sled.png, sprites/fox-sled.svg');
-        }
+        // suppressed asset debug logging
       } catch (e) {}
       if (!isPlaceholder && pImg) {
         // Choose frame size depending on which image was actually loaded.
@@ -123,6 +133,9 @@ export async function loadLevelAssets(ctx: GameContext) {
 
 export async function loadLevelByIndex(ctx: GameContext, idx: number, respawnFn: () => void) {
   if (idx < 0 || idx >= LEVELS.length) return;
+  // stop any existing level music before switching levels
+  try { ctx.music?.pause?.(); } catch (e) {}
+  ctx.music = undefined;
   ctx.currentLevelIndex = idx;
   ctx.currentLevel = JSON.parse(JSON.stringify(LEVELS[idx].level));
   ctx.state = 'loading';

@@ -38,3 +38,16 @@ export const FIXED_DT = 1 / 60;
 
 // Gameplay camera zoom (used when not in editor). <1 = zoomed out, >1 = zoomed in.
 export const GAMEPLAY_ZOOM = 0.8;
+
+// Dynamic camera zoom tuning: target zoom is computed from player speed and
+// smoothly interpolated toward the target each simulation step.
+export const CAMERA_ZOOM = {
+  BASE: GAMEPLAY_ZOOM,
+  MIN: 0.4,
+  MAX: 10.0,
+  // multiplier that maps |vx| -> zoom delta: zoom = BASE - |vx| * SPEED_TO_ZOOM
+  // tuned so typical speeds produce a subtle but visible zoom-out.
+  SPEED_TO_ZOOM: 0.0008,
+  // smoothing factor (higher = faster interpolation)
+  SMOOTH: 8,
+};

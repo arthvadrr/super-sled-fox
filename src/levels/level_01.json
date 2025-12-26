@@ -5154,24 +5154,6 @@
       "layer": 1
     },
     {
-      "type": "sign",
-      "x": 545,
-      "message": ["WELCOME", "", ""],
-      "scale": 1
-    },
-    {
-      "type": "sign",
-      "x": 1146,
-      "message": ["PRESS", "SPACEBAR", "TO JUMP"],
-      "scale": 1
-    },
-    {
-      "type": "sign",
-      "x": 1785,
-      "message": ["ROCKS", "CRASH", "YOU"],
-      "scale": 1
-    },
-    {
       "type": "collider",
       "x": 1947,
       "y": 180,

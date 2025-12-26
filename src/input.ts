@@ -43,12 +43,6 @@ export class InputManager {
     if (!state.isDown) {
       state.isDown = true;
       state.wasPressed = true;
-      // log space presses for debugging jump input reliability
-      if (norm === ' ') {
-        // include raw key/code and timestamp to aid diagnosis
-        // eslint-disable-next-line no-console
-        console.log('[input] space pressed', { key: kRaw, code: e.code, t: performance.now() });
-      }
     }
   }
 

@@ -13,7 +13,8 @@ import {
   VIRTUAL_WIDTH,
   VIRTUAL_HEIGHT,
   CAMERA_SETTINGS,
-  FIXED_DT
+  FIXED_DT,
+  GAMEPLAY_ZOOM
 } from './game/constants';
 import {
   GameState,
@@ -149,6 +150,7 @@ export default function Game() {
       boostBlinkTimer: 0,
       boostBlinkOn: false,
       isBoosting: false,
+      // fixed gameplay zoom (no dynamic zoom)
 
       accumulator: 0,
       lastTime: performance.now()
@@ -232,6 +234,7 @@ export default function Game() {
       gameContext.currCam.x = gameContext.currPlayer.x + (CAMERA_SETTINGS.HORIZONTAL_BIAS || 0);
       gameContext.currCam.y = gameContext.currPlayer.y;
       gameContext.prevCam = { ...gameContext.currCam };
+      // fixed gameplay zoom in use (no per-frame zoom state)
       // resume play
       // restore player sprite if it was removed by explosion
       try {
@@ -241,6 +244,15 @@ export default function Game() {
       stateRef.current = 'playing';
       gameContext.reachedFinish = false;
       gameContext.deathTimer = 0;
+      // If this respawn placed the player at the level start, restart background music
+      try {
+        const startObj = (gameContext.currentLevel.objects || []).find((o: any) => o.type === 'start');
+        const startX = typeof startObj?.x === 'number' ? startObj.x : PLAYER_DEFAULTS.startX;
+        if (rx === startX) {
+          try { gameContext.music?.pause?.(); } catch (e) {}
+          try { void gameContext.music?.play?.(); } catch (e) {}
+        }
+      } catch (e) {}
     }
 
     // Developer test helper: trigger a crash/fall sequence programmatically
@@ -257,6 +269,8 @@ export default function Game() {
     function simulateStep(dt: number, input: InputManager) {
       // Call extracted simulation logic
       simulate(gameContext, dt, input);
+
+      // Fixed gameplay zoom in use; no dynamic zoom calculations.
 
       // Camera follows player with look-ahead and smoothing, clamped to level bounds
       const levelWidth = (gameContext.currentLevel.meta && gameContext.currentLevel.meta.width) || (gameContext.currentLevel.segments && gameContext.currentLevel.segments.length) || VIRTUAL_WIDTH;
@@ -377,8 +391,6 @@ export default function Game() {
           // occur near the end of the frame.
           if (stateRef.current === 'playing' && gameContext.jumpLock <= 0) {
             gameContext.pendingImmediateJump = true;
-            // eslint-disable-next-line no-console
-            console.log('[jump-debug] requested pendingImmediateJump from main loop', { t: performance.now(), press: gameContext.spacePressSnapshot });
           }
         }
       }
@@ -713,31 +725,7 @@ export default function Game() {
                 colliderMenu.appendChild(deleteColliderBtn);
                 editorUI.appendChild(colliderMenu);
 
-                // small floating menu for selected sign: 3 text lines + scale + delete
-                const signMenu = document.createElement('div');
-                signMenu.id = 'editor-sign-menu';
-                signMenu.className = 'decor-menu';
-                signMenu.style.display = 'none';
 
-                const signLineInputs: HTMLInputElement[] = [];
-                for (let i = 0; i < 3; i++) {
-                  const lbl = document.createElement('div');
-                  lbl.textContent = `Line ${i + 1}: `;
-                  const inp = document.createElement('input');
-                  inp.type = 'text';
-                  inp.maxLength = 10 as any;
-                  inp.className = 'editor-input';
-                  lbl.appendChild(inp);
-                  signMenu.appendChild(lbl);
-                  signLineInputs.push(inp as HTMLInputElement);
-                }
-                const signScaleMinus = document.createElement('button'); signScaleMinus.textContent = '-'; signScaleMinus.className = 'editor-btn';
-                const signScalePlus = document.createElement('button'); signScalePlus.textContent = '+'; signScalePlus.className = 'editor-btn';
-                const signDeleteBtn = document.createElement('button'); signDeleteBtn.textContent = 'Delete'; signDeleteBtn.className = 'editor-btn delete';
-                signMenu.appendChild(signScaleMinus);
-                signMenu.appendChild(signScalePlus);
-                signMenu.appendChild(signDeleteBtn);
-                editorUI.appendChild(signMenu);
 
                 // poll selection state from editor via canvas.dataset.editorSelected
                 const pollId = window.setInterval(() => {
@@ -779,22 +767,7 @@ export default function Game() {
                       return;
                     }
 
-                    if (obj.type === 'sign') {
-                      // show sign menu and populate lines
-                      decorMenu.style.display = 'none';
-                      colliderMenu.style.display = 'none';
-                      signMenu.style.display = 'flex';
-                      const lines: string[] = Array.isArray((obj as any).message) ? (obj as any).message : [];
-                      for (let i = 0; i < 3; i++) {
-                        const val = lines[i] || '';
-                        const inp = signLineInputs[i] as HTMLInputElement;
-                        if (inp.value !== val) inp.value = val;
-                      }
-                      // store scale on sign objects
-                      const s = (obj as any).scale || 1;
-                      // show scale in a simple way by storing on a data attr for visual debugging
-                      return;
-                    }
+                    
 
                     // fallback: hide both
                     decorMenu.style.display = 'none';
@@ -924,65 +897,7 @@ export default function Game() {
                   } catch (e) { }
                 };
 
-                // sign menu handlers
-                signScalePlus.onclick = () => {
-                  try {
-                    const canvasElInner = canvasRef.current!;
-                    const sel = canvasElInner.dataset.editorSelected;
-                    if (!sel) return;
-                    const idx = Number(sel);
-                    const obj = currentLevel.objects && currentLevel.objects[idx];
-                    if (!obj || obj.type !== 'sign') return;
-                    (obj as any).scale = ((obj as any).scale || 1) + 0.1;
-                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
-                  } catch (e) { }
-                };
-                signScaleMinus.onclick = () => {
-                  try {
-                    const canvasElInner = canvasRef.current!;
-                    const sel = canvasElInner.dataset.editorSelected;
-                    if (!sel) return;
-                    const idx = Number(sel);
-                    const obj = currentLevel.objects && currentLevel.objects[idx];
-                    if (!obj || obj.type !== 'sign') return;
-                    (obj as any).scale = Math.max(0.1, ((obj as any).scale || 1) - 0.1);
-                    try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
-                  } catch (e) { }
-                };
-                signDeleteBtn.onclick = () => {
-                  try {
-                    const canvasElInner = canvasRef.current!;
-                    const sel = canvasElInner.dataset.editorSelected;
-                    if (!sel) return;
-                    const idx = Number(sel);
-                    if (!Array.isArray(currentLevel.objects)) return;
-                    if (idx >= 0 && idx < currentLevel.objects.length) {
-                      currentLevel.objects.splice(idx, 1);
-                      canvasElInner.dataset.editorSelected = '';
-                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
-                    }
-                  } catch (e) { }
-                };
-                for (let i = 0; i < 3; i++) {
-                  // prevent global key handlers from firing while typing
-                  signLineInputs[i].addEventListener('keydown', (ev) => { ev.stopPropagation(); });
-                  signLineInputs[i].addEventListener('keyup', (ev) => { ev.stopPropagation(); });
-                  // update message on each input event so poll doesn't overwrite typed text
-                  signLineInputs[i].addEventListener('input', () => {
-                    try {
-                      const canvasElInner = canvasRef.current!;
-                      const sel = canvasElInner.dataset.editorSelected;
-                      if (!sel) return;
-                      const idx = Number(sel);
-                      const obj = currentLevel.objects && currentLevel.objects[idx];
-                      if (!obj || obj.type !== 'sign') return;
-                      const lines = Array.isArray((obj as any).message) ? (obj as any).message.slice() : ['', '', ''];
-                      lines[i] = (signLineInputs[i] as HTMLInputElement).value.slice(0, 10).toUpperCase();
-                      (obj as any).message = lines;
-                      try { (gameContext.editorStop as any)?.notify?.(); } catch (e) { }
-                    } catch (e) { }
-                  });
-                }
+                
 
 
 
@@ -1107,7 +1022,7 @@ export default function Game() {
                 window.addEventListener('dragover', onDragOver);
 
                 // attach to editor handlers for cleanup
-                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn, decorLabel, decorMenu, colliderMenu, signMenu, pollId, editorUI };
+                (gameContext.editorStop as any).__exportImportNodes = { exportBtn, importBtn, fileInput, onDrop, onDragOver, widthLabel, heightLabel, widthInput, heightInput, resizeBtn, setHeightBtn, smoothLabel, smoothBtn, radiusInput, avalancheLabel, avalancheInput, setAvalBtn, decorLabel, decorMenu, colliderMenu, pollId, editorUI };
 
                 // wheel zoom handler (anchor zoom at cursor)
                 const wheelHandler = (ev: WheelEvent) => {
@@ -1299,27 +1214,7 @@ export default function Game() {
 
       // if space was pressed this frame but no jump was applied during simulation, log detailed snapshot
       if (gameContext.spacePressSnapshot && !gameContext.jumpAppliedThisFrame) {
-        // eslint-disable-next-line no-console
-        console.log('[jump-debug] SPACE pressed but no jump applied', {
-          press: gameContext.spacePressSnapshot,
-          now: performance.now(),
-          grounded: gameContext.currPlayer.grounded,
-          wasGrounded: gameContext.currPlayer.wasGrounded,
-          lastGroundY: gameContext.lastGroundY,
-          ledgeGrace: gameContext.ledgeGrace,
-          jumpLock: gameContext.jumpLock,
-          coyoteTimer: gameContext.coyoteTimer,
-          jumpBuffer: gameContext.jumpBuffer,
-          vy: gameContext.currPlayer.vy,
-          y: gameContext.currPlayer.y,
-          // additional diagnostics: contact samples and whether input still reports wasPressed
-          contactBack: gameContext.lastContactBack,
-          contactFront: gameContext.lastContactFront,
-          contactAvg: gameContext.lastContactAvg,
-          contactExists: gameContext.lastContactBack !== null && gameContext.lastContactFront !== null,
-          nearGround: gameContext.lastNearGround,
-          inputWasPressedNow: input.get(' ').wasPressed,
-        });
+        // detailed jump debug logging removed
       }
       // clear per-frame transient input flags
       input.clearTransient();

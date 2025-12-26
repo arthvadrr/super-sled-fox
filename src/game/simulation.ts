@@ -19,8 +19,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const prev = (window as any).__lastKeyDownStates || { a: false, left: false, d: false, right: false };
     if (aDown !== prev.a || leftDown !== prev.left || dDown !== prev.d || rightDown !== prev.right) {
       (window as any).__lastKeyDownStates = { a: aDown, left: leftDown, d: dDown, right: rightDown };
-      // eslint-disable-next-line no-console
-      console.log('[input-change] a:', aDown, 'ArrowLeft:', leftDown, 'd:', dDown, 'ArrowRight:', rightDown, 'grounded:', currPlayer.grounded);
     }
   } catch (e) {}
 
@@ -108,17 +106,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   if (contactExists && (currPlayer.wasGrounded || nearGround) && ctx.jumpLock <= 0) {
     // grounded: snap to contact average, reset vertical velocity and set angle
     if (!currPlayer.grounded) {
-      // eslint-disable-next-line no-console
-      console.log('[jump-debug] grounded set TRUE', {
-        t: performance.now(),
-        hb,
-        hf,
-        avgY,
-        nearGround,
-        wasGrounded: currPlayer.wasGrounded,
-        jumpLock: ctx.jumpLock,
-        y: currPlayer.y,
-      });
     }
     // preserve previous vertical velocity so we can emit landing effects
     const prevVy = currPlayer.vy;
@@ -164,8 +151,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         const lastFwdLog = (window as any).__lastFwdAssistLog || 0;
         if (now - lastFwdLog > 250) {
           (window as any).__lastFwdAssistLog = now;
-          // eslint-disable-next-line no-console
-          console.log('[debug][fwd-assist] motorAccel', Math.round(motorAccel), 'vx', Math.round(currPlayer.vx), 'target', Math.round(targetSpeed));
         }
       } catch (e) {}
     }
@@ -180,13 +165,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
       currPlayer.vx += applied;
       try {
         if (applied <= 0 && targetSpeed > currPlayer.vx + 0.001) {
-          // eslint-disable-next-line no-console
-          console.warn('[debug][fwd-applied-zero] applied=0 but target>vx', {
-            targetSpeed: Math.round(targetSpeed),
-            vx: Math.round(currPlayer.vx),
-            motorAccel: Math.round(motorAccel),
-            maxDelta: Math.round(maxDelta),
-          });
         }
       } catch (e) {}
     }
@@ -203,8 +181,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
         const last = (window as any).__lastFwdThrustLog || 0;
         if (now - last > 250) {
           (window as any).__lastFwdThrustLog = now;
-          // eslint-disable-next-line no-console
-          console.log('[debug][fwd-thrust] thrust', Math.round(thrust), 'vx', Math.round(currPlayer.vx));
         }
       } catch (e) {}
     }
@@ -253,20 +229,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
       const shouldLog = aDown && (deltaV > 20 || postVx > 2000);
       if (shouldLog && now - last > 1000) {
         (window as any).__lastInsaneALogTime = now;
-        // eslint-disable-next-line no-console
-        console.warn('[debug][a-press] suspicious vx change while holding a', {
-          preVx: Math.round(preVx),
-          postVx: Math.round(postVx),
-          delta: Math.round(deltaV),
-          forward,
-          back,
-          slopeEff,
-          accelRaw: Math.round(accelRaw),
-          accelScaled: Math.round(accelScaled),
-          motorAccel,
-          targetSpeed,
-          dt,
-        });
       }
     } catch (e) {}
 
@@ -346,8 +308,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   } else {
     // airborne
     if (currPlayer.grounded) {
-      // eslint-disable-next-line no-console
-      console.log('[jump-debug] grounded set FALSE (left ground)', { t: performance.now(), hb, hf, jumpLock: ctx.jumpLock });
       // Start coyote time when we step off the ground.
       ctx.coyoteTimer = COYOTE_TIME;
     }
@@ -382,15 +342,11 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
   if (jumpPressed || ctx.pendingImmediateJump) {
     ctx.jumpBuffer = BUFFER_TIME;
     if (ctx.pendingImmediateJump) {
-      // eslint-disable-next-line no-console
-      console.log('[jump-debug] consuming pendingImmediateJump');
       ctx.pendingImmediateJump = false;
     }
   }
 
   if (ctx.jumpBuffer > 0 && ctx.coyoteTimer > 0 && ctx.jumpLock <= 0) {
-    // eslint-disable-next-line no-console
-    console.log('[jump-debug] APPLYING JUMP', { t: performance.now(), coyote: ctx.coyoteTimer, buffer: ctx.jumpBuffer, vyBefore: currPlayer.vy });
     currPlayer.vy = -PHYS.JUMP_IMPULSE;
     currPlayer.grounded = false;
     ctx.coyoteTimer = 0;
@@ -514,24 +470,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const last = (window as any).__lastHighVxLogTime || 0;
     if (currPlayer.vx > HV_THRESH && now - last > 500) {
       (window as any).__lastHighVxLogTime = now;
-      // gather input snapshot
-      const forwardNow = input.get('ArrowRight').isDown || input.get('d').isDown || input.get('w').isDown;
-      const backNow = input.get('ArrowLeft').isDown || input.get('a').isDown || input.get('s').isDown;
-      // eslint-disable-next-line no-console
-      console.warn('[debug][HV] high vx', {
-        vx: Math.round(currPlayer.vx),
-        vy: Math.round(currPlayer.vy),
-        grounded: currPlayer.grounded,
-        forward: forwardNow,
-        back: backNow,
-        lastSlopeEff: ctx.lastSlopeEff,
-        lastAccelRaw: Math.round(ctx.lastAccelRaw || 0),
-        lastAccelScaled: Math.round(ctx.lastAccelScaled || 0),
-        hb,
-        hf,
-        avgY,
-        dt,
-      });
     }
   } catch (e) {}
   // landing detection (if we were airborne and now we are grounded or cross the ground)
@@ -539,8 +477,6 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
     const h = getHeightAtX(currentLevel as any, currPlayer.x);
     const FEET_OFFSET = 8;
     if (h !== null && currPlayer.y >= h - FEET_OFFSET && currPlayer.vy >= 0 && ctx.jumpLock <= 0) {
-      // eslint-disable-next-line no-console
-      console.log('[jump-debug] landed (cross-threshold)', { t: performance.now(), y: currPlayer.y, h, vy: currPlayer.vy });
       if (currPlayer.vy > 180) {
         ctx.landingFlash = 0.15;
         ctx.effects.shake.shake(Math.min(6, currPlayer.vy / 60));
@@ -582,8 +518,7 @@ export function simulate(ctx: GameContext, dt: number, input: InputManager) {
               const last = (window as any).__lastGapWallLog || 0;
               if (now - last > 150) {
                 (window as any).__lastGapWallLog = now;
-                // eslint-disable-next-line no-console
-                console.log('[debug][gap-wall] edge', i, 'dx', dx.toFixed(2), 'vx', Math.round(currPlayer.vx), 'feetY', Math.round(playerFeetY), 'solidH', Math.round(solidH));
+                // suppressed debug log
               }
             } catch (e) {}
 

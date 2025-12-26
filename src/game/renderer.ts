@@ -361,15 +361,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     const radius = (obj.radius || 12) * zoom;
     // Adjust culling for wide objects like signs so their full board is considered
     let effectiveRadius = radius;
-    try {
-      if (obj.type === 'sign') {
-        const scale = (obj as any).scale || 1;
-        const poleW = Math.max(1, Math.round(2 * zoom * scale));
-        const boardW = Math.round(56 * zoom * scale);
-        // horizontal extent from center: half pole + gap + board width
-        effectiveRadius = Math.max(effectiveRadius, Math.round(poleW / 2 + 2 + boardW));
-      }
-    } catch (e) {}
+    
     if (sx < -effectiveRadius || sx > VIRTUAL_WIDTH + effectiveRadius) continue;
 
     if (obj.type === 'decor') {
@@ -509,56 +501,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
       vctx.lineWidth = Math.max(1 * zoom, 0.5);
       vctx.strokeRect(Math.round(sxL), Math.round(syTop), Math.round(sxR - sxL), h);
     }
-    // draw signs
-    else if (obj.type === 'sign') {
-      const oy = typeof obj.y === 'number' ? obj.y : (getHeightAtX(currentLevel as any, Math.round(obj.x)) ?? VIRTUAL_HEIGHT / 2);
-      const sxSign = isEditor ? wxToS(obj.x) : obj.x - camOffsetX;
-      const sySign = isEditor ? wyToS(oy) : oy - camOffsetY + shakeY;
-      const poleH = 64 * zoom;
-      const poleW = Math.max(1, Math.round(2 * zoom));
-      const poleX = Math.round(sxSign - poleW / 2);
-      const poleY = Math.round(sySign - poleH);
-      vctx.fillStyle = (ctx as any).woodPattern || '#5a3414';
-      vctx.fillRect(poleX, poleY, poleW, Math.round(poleH));
-      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      vctx.lineWidth = Math.max(1 * zoom, 0.5);
-      vctx.strokeRect(poleX, poleY, poleW, Math.round(poleH));
-      // board (support optional `scale` on sign objects)
-      const signScale = (obj as any).scale || 1;
-      const boardW = Math.round(56 * zoom * signScale);
-      const boardH = Math.round(30 * zoom * signScale);
-      const boardX = Math.round(sxSign + poleW / 2 + 2 * signScale);
-      const boardY = Math.round(poleY + 2 * signScale);
-      vctx.fillStyle = '#c28f59';
-      vctx.fillRect(boardX, boardY, boardW, boardH);
-      vctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      vctx.strokeRect(boardX, boardY, boardW, boardH);
-      // text with padding and monospace font; center and use consistent line height
-      try {
-        const lines: string[] = Array.isArray((obj as any).message) ? (obj as any).message : [];
-        vctx.fillStyle = '#000';
-        const padX = 8 * zoom * signScale;
-        const padY = 6 * zoom * signScale;
-        const fontSize = Math.max(9 * zoom * signScale, 9);
-        vctx.font = `${fontSize}px monospace`;
-        vctx.textAlign = 'center';
-        vctx.textBaseline = 'top';
-        const availableH = Math.max(1, boardH - padY * 2);
-        const baseLineH = Math.max(1, Math.floor(availableH / 3));
-        const extraSpacing = Math.max(1, Math.round(2 * zoom * signScale));
-        const lineH = baseLineH; // height reserved for each line's font area
-        // center text block vertically, accounting for extra spacing between lines
-        const linesCount = Math.min(3, Math.max(1, lines.length));
-        const totalTextH = lineH * linesCount + extraSpacing * (linesCount - 1);
-        const startY = boardY + padY + Math.floor((availableH - totalTextH) / 2);
-        const cx = boardX + boardW / 2;
-        for (let i = 0; i < linesCount; i++) {
-          const txt = (lines[i] || '').slice(0, 10).toUpperCase();
-          const ty = startY + i * (lineH + extraSpacing);
-          vctx.fillText(txt, cx, ty);
-        }
-      } catch (e) {}
-    }
+    
   }
 
   vctx.save();
@@ -576,9 +519,6 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
     try {
       const seen = (window as any).__playerSpriteLogged;
       if (!seen && typeof (playerEntity as any).collectDrawDescriptors === 'function') {
-        const descs = (playerEntity as any).collectDrawDescriptors(0, FEET_OFFSET, { anchor: 'bottom', scale: zoom });
-        // eslint-disable-next-line no-console
-        console.log('[renderer] player draw descriptors:', descs);
         (window as any).__playerSpriteLogged = true;
       }
     } catch (e) {}
