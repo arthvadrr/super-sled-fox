@@ -49,6 +49,7 @@ export function startEditor(opts: StartOpts) {
   let gapFillHeight: number = 100;
   let selectedObjectIndex: number | null = null; // index into level.objects
   let draggingObjectIndex: number | null = null;
+  let clipboardObject: any | null = null;
   let statusText: string | null = null;
 
   function scheduleOnChange() {
@@ -384,6 +385,36 @@ export function startEditor(opts: StartOpts) {
       }
     } catch (err) {}
     const k = e.key.toLowerCase();
+    // copy / paste for decor: Ctrl/Cmd+C, Ctrl/Cmd+V
+    try {
+      const isMod = e.ctrlKey || e.metaKey;
+      if (isMod && k === 'c' && selectedObjectIndex !== null) {
+        const so = level.objects[selectedObjectIndex];
+        if (so && so.type === 'decor') {
+          // deep-clone the object (shallow properties suffices)
+          clipboardObject = JSON.parse(JSON.stringify(so));
+        }
+        return;
+      }
+      if (isMod && k === 'v') {
+        if (!clipboardObject) return;
+        if (!Array.isArray(level.objects)) level.objects = [] as any;
+        // place at hovered index if available, else next after selected, else end
+        let placeIndex = null as number | null;
+        if (typeof hoveredIndex === 'number' && hoveredIndex !== null) placeIndex = hoveredIndex;
+        else if (selectedObjectIndex !== null) {
+          placeIndex = Math.min(level.segments.length - 1, (level.objects[selectedObjectIndex].x || 0) + 1);
+        }
+        const newX = placeIndex !== null ? placeIndex : Math.max(0, Math.floor(level.segments.length / 2));
+        const clone = JSON.parse(JSON.stringify(clipboardObject));
+        clone.x = newX;
+        // append and select the new object
+        level.objects.push(clone);
+        selectedObjectIndex = level.objects.length - 1;
+        scheduleOnChange();
+        return;
+      }
+    } catch (err) {}
     if (k === '1') currentTool = Tool.PaintHeight;
     else if (k === '2') currentTool = Tool.ToggleGap;
     else if (k === '3') currentTool = Tool.PlaceCheckpoint;
