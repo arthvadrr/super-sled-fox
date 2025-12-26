@@ -15,8 +15,7 @@ export const CAMERA_SETTINGS = {
   LOOK_AHEAD_MULT: 0.5,
   MAX_LOOK_AHEAD: 60,
   SMOOTH: 8,
-  // horizontal camera bias in world units: positive pans camera right (player appears more left)
-  HORIZONTAL_BIAS: 72,
+  HORIZONTAL_BIAS: 90,
 };
 
 export const RENDER_SETTINGS = {
@@ -36,3 +35,6 @@ export const EDITOR_SETTINGS = {
 };
 
 export const FIXED_DT = 1 / 60;
+
+// Gameplay camera zoom (used when not in editor). <1 = zoomed out, >1 = zoomed in.
+export const GAMEPLAY_ZOOM = 0.8;

@@ -1,4 +1,4 @@
-import { VIRTUAL_WIDTH, VIRTUAL_HEIGHT, RENDER_SETTINGS, FIXED_DT } from './constants';
+import { VIRTUAL_WIDTH, VIRTUAL_HEIGHT, RENDER_SETTINGS, FIXED_DT, GAMEPLAY_ZOOM } from './constants';
 import { GameContext } from './types';
 import { getHeightAtX } from '../heightmap';
 import assetManager from '../assetManager';
@@ -33,7 +33,7 @@ export function draw(ctx: GameContext, vctx: CanvasRenderingContext2D, canvasEl:
   // interpolation alpha based on accumulator
   const alpha = Math.max(0, Math.min(1, accumulator / FIXED_DT));
   const isEditor = state === 'editor';
-  const zoom = isEditor ? editorZoom : 1;
+  const zoom = isEditor ? editorZoom : GAMEPLAY_ZOOM;
 
   // interpolate player and camera
   const ix = prevPlayer.x * (1 - alpha) + currPlayer.x * alpha;

@@ -1190,7 +1190,7 @@ export default function Game() {
                       const tag = (ae.tagName || '').toLowerCase();
                       if (tag === 'input' || tag === 'textarea' || tag === 'select' || ae.isContentEditable) return;
                     }
-                  } catch (err) {}
+                  } catch (err) { }
                   if (ev.key === '=' || ev.key === '+') {
                     let newZoom = Math.max(EDITOR_ZOOM_MIN, Math.min(EDITOR_ZOOM_MAX, gameContext.editorZoom * 1.1));
                     gameContext.editorZoom = newZoom; gameContext.lastEditorZoom = gameContext.editorZoom;
